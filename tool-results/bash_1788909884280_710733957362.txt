@@ -1,0 +1,774 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import {
+     5→  Bot,
+     6→  Check,
+     7→  CheckCircle2,
+     8→  Code2,
+     9→  Copy,
+    10→  Eye,
+    11→  EyeOff,
+    12→  ImagePlus,
+    13→  Loader2,
+    14→  MonitorPlay,
+    15→  Palette,
+    16→  Save,
+    17→  Send,
+    18→  Stamp,
+    19→  Trash2,
+    20→  TriangleAlert,
+    21→} from "lucide-react";
+    22→import { toast } from "sonner";
+    23→import { Badge } from "@/components/ui/badge";
+    24→import { Button } from "@/components/ui/button";
+    25→import {
+    26→  Card,
+    27→  CardContent,
+    28→  CardDescription,
+    29→  CardHeader,
+    30→  CardTitle,
+    31→} from "@/components/ui/card";
+    32→import { Input } from "@/components/ui/input";
+    33→import { Label } from "@/components/ui/label";
+    34→import {
+    35→  Select,
+    36→  SelectContent,
+    37→  SelectItem,
+    38→  SelectTrigger,
+    39→  SelectValue,
+    40→} from "@/components/ui/select";
+    41→import { Switch } from "@/components/ui/switch";
+    42→import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+    43→import {
+    44→  apiJson,
+    45→  toErrorMessage,
+    46→  CARD_THEME_OPTIONS,
+    47→  WATERMARK_POSITIONS,
+    48→  type AssistantConfig,
+    49→  type WatermarkConfig,
+    50→} from "@/components/shared";
+    51→
+    52→export interface SettingsSectionProps {
+    53→  watermark: WatermarkConfig;
+    54→  onWatermarkChange: (w: WatermarkConfig) => void;
+    55→  assistant: AssistantConfig;
+    56→  onAssistantChange: (a: AssistantConfig) => void;
+    57→  cardTheme: string;
+    58→  onCardThemeChange: (key: string) => void;
+    59→  disabled?: boolean;
+    60→}
+    61→
+    62→interface BaleInfo {
+    63→  username?: string;
+    64→  [key: string]: unknown;
+    65→}
+    66→
+    67→/* ─── پیش‌نمایش کوچک هر تم ─────────────────────────────────── */
+    68→
+    69→function ThemeMiniPreview({ swatch, dark }: { swatch: string[]; dark?: boolean }) {
+    70→  const [accent, soft, usage] = swatch;
+    71→  const bg = dark ? soft : "#ffffff";
+    72→  return (
+    73→    <div
+    74→      className="w-full rounded-lg border p-2.5 shadow-sm"
+    75→      style={{ background: bg, borderColor: dark ? "#2b3a52" : "#e5e7eb" }}
+    76→      aria-hidden
+    77→    >
+    78→      <div className="mb-1.5 flex items-center gap-1.5">
+    79→        <span className="h-1.5 w-10 rounded-full" style={{ background: dark ? "#8fa1ba" : "#cbd5e1" }} />
+    80→        <span className="h-1.5 w-6 rounded-full" style={{ background: dark ? "#3b4c66" : "#e2e8f0" }} />
+    81→      </div>
+    82→      <div className="mb-1.5 h-8 rounded-md" style={{ background: dark ? "#223047" : "#f1f5f9" }} />
+    83→      <div className="flex items-center justify-between gap-2">
+    84→        <span
+    85→          className="rounded-full px-2 py-0.5 text-[9px] font-bold"
+    86→          style={{ background: dark ? "rgba(255,255,255,.08)" : soft, color: accent }}
+    87→        >
+    88→          ۱۲۳٬۰۰۰
+    89→        </span>
+    90→        <span className="h-1.5 w-12 rounded-full" style={{ background: usage, opacity: 0.55 }} />
+    91→      </div>
+    92→    </div>
+    93→  );
+    94→}
+    95→
+    96→export function SettingsSection({
+    97→  watermark,
+    98→  onWatermarkChange,
+    99→  assistant,
+   100→  onAssistantChange,
+   101→  cardTheme,
+   102→  onCardThemeChange,
+   103→  disabled,
+   104→}: SettingsSectionProps) {
+   105→  const [saving, setSaving] = React.useState(false);
+   106→  const [baleToken, setBaleToken] = React.useState("");
+   107→  const [showToken, setShowToken] = React.useState(false);
+   108→  const [baleLoading, setBaleLoading] = React.useState(false);
+   109→  const [baleConnected, setBaleConnected] = React.useState(false);
+   110→  const [baleInfo, setBaleInfo] = React.useState<BaleInfo | null>(null);
+   111→  const [baleError, setBaleError] = React.useState("");
+   112→  const [copied, setCopied] = React.useState(false);
+   113→
+   114→  /* پیش‌نمایش زنده تم */
+   115→  const [previewTheme, setPreviewTheme] = React.useState(cardTheme);
+   116→  const [previewHtml, setPreviewHtml] = React.useState("");
+   117→  const [previewLoading, setPreviewLoading] = React.useState(false);
+   118→  const previewCache = React.useRef<Map<string, string>>(new Map());
+   119→
+   120→  // همگام‌سازی تم پیش‌نمایش با تم انتخابی
+   121→  React.useEffect(() => {
+   122→    setPreviewTheme(cardTheme);
+   123→  }, [cardTheme]);
+   124→
+   125→  // بارگذاری HTML پیش‌نمایش برای تم فعال (با کش)
+   126→  React.useEffect(() => {
+   127→    let cancelled = false;
+   128→    const cached = previewCache.current.get(previewTheme);
+   129→    if (cached) {
+   130→      setPreviewHtml(cached);
+   131→      return;
+   132→    }
+   133→    setPreviewLoading(true);
+   134→    apiJson<{ ok: boolean; html: string }>(
+   135→      `/api/card-preview?theme=${encodeURIComponent(previewTheme)}`,
+   136→    )
+   137→      .then((data) => {
+   138→        if (cancelled) return;
+   139→        previewCache.current.set(previewTheme, data.html || "");
+   140→        setPreviewHtml(data.html || "");
+   141→      })
+   142→      .catch(() => {
+   143→        if (!cancelled) setPreviewHtml("");
+   144→      })
+   145→      .finally(() => {
+   146→        if (!cancelled) setPreviewLoading(false);
+   147→      });
+   148→    return () => {
+   149→      cancelled = true;
+   150→    };
+   151→  }, [previewTheme]);
+   152→
+   153→  // بررسی وضعیت اتصال قبلی ربات بله
+   154→  React.useEffect(() => {
+   155→    let cancelled = false;
+   156→    apiJson<{ ok: boolean; tokenSet: boolean; lastInfo?: BaleInfo }>(
+   157→      "/api/bale/status",
+   158→    )
+   159→      .then((data) => {
+   160→        if (cancelled) return;
+   161→        setBaleConnected(Boolean(data.tokenSet));
+   162→        if (data.lastInfo) setBaleInfo(data.lastInfo);
+   163→      })
+   164→      .catch(() => {});
+   165→    return () => {
+   166→      cancelled = true;
+   167→    };
+   168→  }, []);
+   169→
+   170→  const posLabel =
+   171→    WATERMARK_POSITIONS.find((p) => p.value === watermark.pos)?.label ?? "";
+   172→
+   173→  const saveSettings = async () => {
+   174→    setSaving(true);
+   175→    try {
+   176→      await apiJson("/api/settings", {
+   177→        method: "POST",
+   178→        headers: { "Content-Type": "application/json" },
+   179→        body: JSON.stringify({
+   180→          watermarkText: watermark.text,
+   181→          watermarkMode: watermark.mode,
+   182→          watermarkPos: watermark.pos,
+   183→          cardTheme,
+   184→          assistantUrl: assistant.url,
+   185→          assistantKey: assistant.key,
+   186→          assistantModel: assistant.model,
+   187→          useExternal: assistant.enabled,
+   188→        }),
+   189→      });
+   190→      toast.success("تنظیمات با موفقیت ذخیره شد");
+   191→    } catch (e) {
+   192→      toast.error("ذخیره تنظیمات ناموفق بود", {
+   193→        description: toErrorMessage(e),
+   194→      });
+   195→    } finally {
+   196→      setSaving(false);
+   197→    }
+   198→  };
+   199→
+   200→  /* ذخیره فوری تم هنگام انتخاب */
+   201→  const pickTheme = async (key: string) => {
+   202→    onCardThemeChange(key);
+   203→    try {
+   204→      await apiJson("/api/settings", {
+   205→        method: "POST",
+   206→        headers: { "Content-Type": "application/json" },
+   207→        body: JSON.stringify({ cardTheme: key }),
+   208→      });
+   209→    } catch {
+   210→      /* بی‌صدا — انتخاب محلی حفظ می‌شود */
+   211→    }
+   212→  };
+   213→
+   214→  const embedOrigin =
+   215→    typeof window !== "undefined" ? window.location.origin : "https://your-domain.com";
+   216→  const embedSnippet = `<script\n  src="${embedOrigin}/api/embed/widget.js"\n  data-title="پشتیبانی فروشگاه"\n  data-pos="left"\n  data-accent="#059669"\n  defer\n></script>`;
+   217→
+   218→  const copySnippet = async () => {
+   219→    try {
+   220→      await navigator.clipboard.writeText(embedSnippet);
+   221→      setCopied(true);
+   222→      toast.success("کد ویجت کپی شد");
+   223→      window.setTimeout(() => setCopied(false), 2000);
+   224→    } catch (e) {
+   225→      toast.error("کپی ناموفق بود", { description: toErrorMessage(e) });
+   226→    }
+   227→  };
+   228→
+   229→  const setupBale = async () => {
+   230→    const token = baleToken.trim();
+   231→    if (!token) {
+   232→      toast.error("توکن ربات بله را وارد کنید");
+   233→      return;
+   234→    }
+   235→    setBaleLoading(true);
+   236→    setBaleError("");
+   237→    try {
+   238→      const data = await apiJson<{
+   239→        ok: boolean;
+   240→        info?: BaleInfo;
+   241→        error?: string;
+   242→      }>("/api/bale/setup", {
+   243→        method: "POST",
+   244→        headers: { "Content-Type": "application/json" },
+   245→        body: JSON.stringify({ token }),
+   246→      });
+   247→      if (data.ok) {
+   248→        setBaleConnected(true);
+   249→        setBaleInfo(data.info ?? null);
+   250→        setBaleToken("");
+   251→        toast.success("ربات بله متصل شد و وب‌هوک ثبت گردید");
+   252→      } else {
+   253→        setBaleConnected(false);
+   254→        setBaleError(data.error ?? "اتصال ناموفق بود");
+   255→        toast.error("اتصال ربات بله ناموفق بود", {
+   256→          description: data.error,
+   257→        });
+   258→      }
+   259→    } catch (e) {
+   260→      setBaleConnected(false);
+   261→      setBaleError(toErrorMessage(e));
+   262→      toast.error("اتصال ربات بله ناموفق بود", {
+   263→        description: toErrorMessage(e),
+   264→      });
+   265→    } finally {
+   266→      setBaleLoading(false);
+   267→    }
+   268→  };
+   269→
+   270→  const readLogo = (file: File) => {
+   271→    const reader = new FileReader();
+   272→    reader.onload = () => {
+   273→      onWatermarkChange({
+   274→        ...watermark,
+   275→        logoDataUrl: String(reader.result ?? ""),
+   276→        logoName: file.name,
+   277→      });
+   278→    };
+   279→    reader.readAsDataURL(file);
+   280→  };
+   281→
+   282→  return (
+   283→    <Card
+   284→      id="settings"
+   285→      className={`scroll-mt-24 ${disabled ? "pointer-events-none opacity-60" : undefined}`}
+   286→    >
+   287→      <CardHeader>
+   288→        <CardTitle className="flex items-center gap-2 text-lg">
+   289→          <span className="flex size-9 items-center justify-center rounded-xl bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
+   290→            <Stamp className="size-5" aria-hidden />
+   291→          </span>
+   292→          تنظیمات
+   293→        </CardTitle>
+   294→        <CardDescription>
+   295→          واترمارک، تم قالب، دستیار خارجی و ربات بله را پیکربندی کنید
+   296→        </CardDescription>
+   297→      </CardHeader>
+   298→
+   299→      <CardContent>
+   300→        <Tabs defaultValue="watermark">
+   301→          <TabsList className="grid h-11 w-full grid-cols-4 rounded-xl">
+   302→            <TabsTrigger value="watermark" className="gap-1 rounded-lg px-1.5">
+   303→              <Stamp className="size-4" aria-hidden />
+   304→              <span className="text-xs">واترمارک</span>
+   305→            </TabsTrigger>
+   306→            <TabsTrigger value="theme" className="gap-1 rounded-lg px-1.5">
+   307→              <Palette className="size-4" aria-hidden />
+   308→              <span className="text-xs">قالب کارت</span>
+   309→            </TabsTrigger>
+   310→            <TabsTrigger value="assistant" className="gap-1 rounded-lg px-1.5">
+   311→              <Bot className="size-4" aria-hidden />
+   312→              <span className="text-xs">دستیار</span>
+   313→            </TabsTrigger>
+   314→            <TabsTrigger value="bale" className="gap-1 rounded-lg px-1.5">
+   315→              <Send className="size-4" aria-hidden />
+   316→              <span className="text-xs">ربات بله</span>
+   317→            </TabsTrigger>
+   318→          </TabsList>
+   319→
+   320→          {/* ── تب واترمارک ── */}
+   321→          <TabsContent value="watermark" className="mt-4 space-y-5">
+   322→            <div className="flex items-center justify-between gap-3 rounded-xl border bg-muted/40 p-3.5">
+   323→              <div className="space-y-0.5">
+   324→                <Label htmlFor="logo-mode-switch" className="text-sm font-semibold">
+   325→                  استفاده از لوگو به‌جای متن
+   326→                </Label>
+   327→                <p className="text-xs text-muted-foreground">
+   328→                  {watermark.mode === "text"
+   329→                    ? "واترمارک متنی روی تصویر اعمال می‌شود"
+   330→                    : "تصویر لوگوی شما روی تصویر اعمال می‌شود"}
+   331→                </p>
+   332→              </div>
+   333→              <Switch
+   334→                id="logo-mode-switch"
+   335→                checked={watermark.mode === "logo"}
+   336→                onCheckedChange={(v) =>
+   337→                  onWatermarkChange({ ...watermark, mode: v ? "logo" : "text" })
+   338→                }
+   339→                aria-label="تغییر حالت واترمارک بین متن و لوگو"
+   340→              />
+   341→            </div>
+   342→
+   343→            {watermark.mode === "text" ? (
+   344→              <div className="space-y-4">
+   345→                <div className="space-y-2">
+   346→                  <Label htmlFor="watermark-text" className="text-sm font-semibold">
+   347→                    متن واترمارک
+   348→                  </Label>
+   349→                  <Input
+   350→                    id="watermark-text"
+   351→                    value={watermark.text}
+   352→                    onChange={(e) =>
+   353→                      onWatermarkChange({ ...watermark, text: e.target.value })
+   354→                    }
+   355→                    placeholder="مثلاً: فروشگاه آرایشی من"
+   356→                    className="h-11 rounded-xl"
+   357→                  />
+   358→                </div>
+   359→                <div className="space-y-2">
+   360→                  <Label className="text-sm font-semibold">موقعیت واترمارک</Label>
+   361→                  <Select
+   362→                    dir="rtl"
+   363→                    value={watermark.pos}
+   364→                    onValueChange={(v) => onWatermarkChange({ ...watermark, pos: v })}
+   365→                  >
+   366→                    <SelectTrigger className="h-11 w-full rounded-xl">
+   367→                      <SelectValue placeholder="انتخاب موقعیت" />
+   368→                    </SelectTrigger>
+   369→                    <SelectContent>
+   370→                      {WATERMARK_POSITIONS.map((p) => (
+   371→                        <SelectItem key={p.value} value={p.value}>
+   372→                          {p.label}
+   373→                        </SelectItem>
+   374→                      ))}
+   375→                    </SelectContent>
+   376→                  </Select>
+   377→                </div>
+   378→              </div>
+   379→            ) : (
+   380→              <div className="space-y-3">
+   381→                <Label className="text-sm font-semibold">تصویر لوگو</Label>
+   382→                {watermark.logoDataUrl ? (
+   383→                  <div className="flex items-center gap-3 rounded-xl border bg-muted/40 p-3">
+   384→                    <img
+   385→                      src={watermark.logoDataUrl}
+   386→                      alt="پیش‌نمایش لوگو"
+   387→                      className="size-14 rounded-lg border bg-white object-contain p-1"
+   388→                    />
+   389→                    <div className="min-w-0 flex-1">
+   390→                      <p className="truncate text-sm font-medium" dir="ltr">
+   391→                        {watermark.logoName}
+   392→                      </p>
+   393→                      <p className="text-xs text-muted-foreground">
+   394→                        لوگو بارگذاری شد
+   395→                      </p>
+   396→                    </div>
+   397→                    <Button
+   398→                      type="button"
+   399→                      variant="ghost"
+   400→                      size="icon"
+   401→                      className="size-9 shrink-0 rounded-lg text-red-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
+   402→                      onClick={() =>
+   403→                        onWatermarkChange({
+   404→                          ...watermark,
+   405→                          logoDataUrl: "",
+   406→                          logoName: "",
+   407→                        })
+   408→                      }
+   409→                      aria-label="حذف لوگو"
+   410→                    >
+   411→                      <Trash2 className="size-4" aria-hidden />
+   412→                    </Button>
+   413→                  </div>
+   414→                ) : (
+   415→                  <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-border bg-muted/40 p-4 text-center transition-colors hover:border-emerald-400 hover:bg-emerald-50/60 dark:hover:bg-emerald-950/20">
+   416→                    <ImagePlus className="size-6 text-muted-foreground" aria-hidden />
+   417→                    <span className="text-sm text-muted-foreground">
+   418→                      انتخاب تصویر لوگو (PNG یا SVG شفاف)
+   419→                    </span>
+   420→                    <input
+   421→                      type="file"
+   422→                      accept="image/png,image/jpeg,image/webp,image/svg+xml"
+   423→                      className="hidden"
+   424→                      onChange={(e) => {
+   425→                        const file = e.target.files?.[0];
+   426→                        if (file) readLogo(file);
+   427→                        e.target.value = "";
+   428→                      }}
+   429→                    />
+   430→                  </label>
+   431→                )}
+   432→              </div>
+   433→            )}
+   434→
+   435→            <p className="rounded-xl bg-amber-50 px-3.5 py-2.5 text-xs leading-6 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
+   436→              راهنما: {watermark.mode === "text" ? `متن «${watermark.text || "برند شما"}» ` : "لوگوی انتخابی "}
+   437→              به‌صورت <b>{posLabel}</b> روی تصویر اصلی هر کارت اعمال می‌شود.
+   438→            </p>
+   439→          </TabsContent>
+   440→
+   441→          {/* ── تب قالب کارت (تم‌های رنگی + پیش‌نمایش زنده) ── */}
+   442→          <TabsContent value="theme" className="mt-4 space-y-4">
+   443→            <p className="text-xs leading-6 text-muted-foreground">
+   444→              تم رنگی قالب کارت‌های خروجی را انتخاب کنید؛ رنگ قیمت، جدول مشخصات،
+   445→              روش مصرف و دکمه لینک مطابق تم رندر می‌شود. انتخاب فوراً ذخیره می‌شود.
+   446→            </p>
+   447→            <div className="grid grid-cols-2 gap-2.5">
+   448→              {CARD_THEME_OPTIONS.map((t) => {
+   449→                const active = cardTheme === t.key;
+   450→                const hovered = previewTheme === t.key;
+   451→                return (
+   452→                  <button
+   453→                    key={t.key}
+   454→                    type="button"
+   455→                    onClick={() => void pickTheme(t.key)}
+   456→                    onMouseEnter={() => setPreviewTheme(t.key)}
+   457→                    onFocus={() => setPreviewTheme(t.key)}
+   458→                    aria-pressed={active}
+   459→                    className={`group relative flex flex-col gap-2 rounded-xl border-2 p-2.5 text-right outline-none transition-all hover:-translate-y-0.5 hover:shadow-md focus-visible:ring-2 focus-visible:ring-emerald-500 ${
+   460→                      active
+   461→                        ? "border-emerald-500 bg-emerald-50/70 shadow-sm dark:bg-emerald-950/30"
+   462→                        : hovered
+   463→                          ? "border-emerald-300 bg-card shadow-sm"
+   464→                          : "border-border bg-card hover:border-emerald-300"
+   465→                    }`}
+   466→                  >
+   467→                    {active && (
+   468→                      <CheckCircle2
+   469→                        className="absolute left-2 top-2 size-4 text-emerald-600 dark:text-emerald-400"
+   470→                        aria-hidden
+   471→                      />
+   472→                    )}
+   473→                    <ThemeMiniPreview swatch={t.swatch} dark={t.key === "midnight"} />
+   474→                    <span className="flex items-center gap-1.5 text-xs font-bold">
+   475→                      <span
+   476→                        className="inline-block size-3 rounded-full ring-1 ring-black/10"
+   477→                        style={{ background: t.swatch[0] }}
+   478→                        aria-hidden
+   479→                      />
+   480→                      {t.label}
+   481→                    </span>
+   482→                  </button>
+   483→                );
+   484→              })}
+   485→            </div>
+   486→
+   487→            {/* پیش‌نمایش زنده قالب */}
+   488→            <div className="overflow-hidden rounded-xl border shadow-sm">
+   489→              <div className="flex items-center justify-between gap-2 border-b bg-muted/60 px-3 py-2">
+   490→                <div className="flex items-center gap-1.5" aria-hidden>
+   491→                  <span className="size-2.5 rounded-full bg-red-400" />
+   492→                  <span className="size-2.5 rounded-full bg-amber-400" />
+   493→                  <span className="size-2.5 rounded-full bg-emerald-400" />
+   494→                </div>
+   495→                <p className="flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground">
+   496→                  <MonitorPlay className="size-3.5" aria-hidden />
+   497→                  پیش‌نمایش زنده — تم {CARD_THEME_OPTIONS.find((t) => t.key === previewTheme)?.label ?? ""}
+   498→                </p>
+   499→              </div>
+   500→              <div
+   501→                className="relative flex h-[300px] justify-center overflow-hidden"
+   502→                style={{
+   503→                  background:
+   504→                    previewTheme === "midnight" ? "#0b1220" : "#f3f4f6",
+   505→                }}
+   506→              >
+   507→                {previewHtml ? (
+   508→                  <iframe
+   509→                    srcDoc={previewHtml}
+   510→                    title="پیش‌نمایش زنده قالب کارت"
+   511→                    sandbox=""
+   512→                    loading="lazy"
+   513→                    className="pointer-events-none h-[764px] w-[480px] shrink-0 border-0 bg-white"
+   514→                    style={{ transform: "scale(0.62)", transformOrigin: "top center" }}
+   515→                  />
+   516→                ) : (
+   517→                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+   518→                    <Loader2 className="size-4 animate-spin" aria-hidden />
+   519→                    در حال آماده‌سازی پیش‌نمایش…
+   520→                  </div>
+   521→                )}
+   522→                {previewLoading && previewHtml && (
+   523→                  <div className="absolute inset-x-0 top-0 flex justify-center bg-background/70 py-1.5 backdrop-blur-sm">
+   524→                    <Loader2 className="size-3.5 animate-spin text-emerald-600" aria-hidden />
+   525→                  </div>
+   526→                )}
+   527→              </div>
+   528→            </div>
+   529→            <p className="text-[11px] leading-5 text-muted-foreground">
+   530→              نشانگر را روی هر تم نگه دارید تا پیش‌نمایش زنده تغییر کند؛ با کلیک، آن تم ذخیره می‌شود.
+   531→            </p>
+   532→
+   533→            <p className="rounded-xl bg-emerald-50 px-3.5 py-2.5 text-xs leading-6 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300">
+   534→              تم انتخاب‌شده روی همه کارت‌های <b>پردازش بعدی</b> اعمال می‌شود. برای تغییر
+   535→              یکجای تم کارت‌های موجود، از دکمه «تغییر گروهی تم» در بخش خروجی‌ها استفاده کنید.
+   536→            </p>
+   537→          </TabsContent>
+   538→
+   539→          {/* ── تب دستیار خارجی + ویجت ── */}
+   540→          <TabsContent value="assistant" className="mt-4 space-y-5">
+   541→            <div className="flex items-center justify-between gap-3 rounded-xl border bg-muted/40 p-3.5">
+   542→              <div className="space-y-0.5">
+   543→                <Label htmlFor="external-switch" className="text-sm font-semibold">
+   544→                  اتصال به دستیار هوشمند خارجی
+   545→                </Label>
+   546→                <p className="text-xs text-muted-foreground">
+   547→                  در صورت فعال بودن، درخواست‌های ویرایش به سرویس شما ارسال می‌شود
+   548→                </p>
+   549→              </div>
+   550→              <Switch
+   551→                id="external-switch"
+   552→                checked={assistant.enabled}
+   553→                onCheckedChange={(v) =>
+   554→                  onAssistantChange({ ...assistant, enabled: v })
+   555→                }
+   556→                aria-label="فعال یا غیرفعال کردن دستیار خارجی"
+   557→              />
+   558→            </div>
+   559→
+   560→            <div className={`space-y-4 ${assistant.enabled ? "" : "pointer-events-none opacity-50"}`}>
+   561→              <div className="space-y-2">
+   562→                <Label htmlFor="assistant-url" className="text-sm font-semibold">
+   563→                  Base URL
+   564→                </Label>
+   565→                <Input
+   566→                  id="assistant-url"
+   567→                  value={assistant.url}
+   568→                  onChange={(e) =>
+   569→                    onAssistantChange({ ...assistant, url: e.target.value })
+   570→                  }
+   571→                  placeholder="https://api.example.com/v1"
+   572→                  dir="ltr"
+   573→                  className="h-11 rounded-xl text-left"
+   574→                />
+   575→              </div>
+   576→              <div className="space-y-2">
+   577→                <Label htmlFor="assistant-key" className="text-sm font-semibold">
+   578→                  کلید API
+   579→                </Label>
+   580→                <Input
+   581→                  id="assistant-key"
+   582→                  type="password"
+   583→                  value={assistant.key}
+   584→                  onChange={(e) =>
+   585→                    onAssistantChange({ ...assistant, key: e.target.value })
+   586→                  }
+   587→                  placeholder="sk-..."
+   588→                  dir="ltr"
+   589→                  autoComplete="off"
+   590→                  className="h-11 rounded-xl text-left"
+   591→                />
+   592→              </div>
+   593→              <div className="space-y-2">
+   594→                <Label htmlFor="assistant-model" className="text-sm font-semibold">
+   595→                  نام مدل
+   596→                </Label>
+   597→                <Input
+   598→                  id="assistant-model"
+   599→                  value={assistant.model}
+   600→                  onChange={(e) =>
+   601→                    onAssistantChange({ ...assistant, model: e.target.value })
+   602→                  }
+   603→                  placeholder="gpt-4o-mini"
+   604→                  dir="ltr"
+   605→                  className="h-11 rounded-xl text-left"
+   606→                />
+   607→              </div>
+   608→              <Button
+   609→                type="button"
+   610→                onClick={saveSettings}
+   611→                disabled={saving}
+   612→                className="h-11 w-full gap-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700"
+   613→              >
+   614→                {saving ? (
+   615→                  <Loader2 className="size-4 animate-spin" aria-hidden />
+   616→                ) : (
+   617→                  <Save className="size-4" aria-hidden />
+   618→                )}
+   619→                ذخیره تنظیمات
+   620→              </Button>
+   621→            </div>
+   622→
+   623→            {/* ── ویجت چت برای وب‌سایت ── */}
+   624→            <div className="space-y-3 rounded-xl border border-dashed p-3.5">
+   625→              <div className="flex items-center gap-2">
+   626→                <span className="flex size-8 items-center justify-center rounded-lg bg-violet-100 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300">
+   627→                  <Code2 className="size-4" aria-hidden />
+   628→                </span>
+   629→                <div>
+   630→                  <p className="text-sm font-bold">ویجت چت برای وب‌سایت شما</p>
+   631→                  <p className="text-[11px] text-muted-foreground">
+   632→                    همین دستیار را با یک خط کد در هر سایت دیگری جاسازی کنید
+   633→                  </p>
+   634→                </div>
+   635→              </div>
+   636→              <pre
+   637→                dir="ltr"
+   638→                className="scrollbar-thin max-h-32 overflow-auto rounded-lg bg-zinc-900 p-3 text-left font-mono text-[11px] leading-5 text-emerald-300"
+   639→              >
+   640→                {embedSnippet}
+   641→              </pre>
+   642→              <div className="flex items-center justify-between gap-2">
+   643→                <p className="text-[10.5px] leading-5 text-muted-foreground">
+   644→                  <code dir="ltr" className="font-mono">data-pos</code> چپ/راست،{" "}
+   645→                  <code dir="ltr" className="font-mono">data-accent</code> رنگ،{" "}
+   646→                  <code dir="ltr" className="font-mono">data-title</code> عنوان و{" "}
+   647→                  <code dir="ltr" className="font-mono">data-welcome</code> پیام خوش‌آمد را تعیین می‌کند.
+   648→                </p>
+   649→                <Button
+   650→                  type="button"
+   651→                  size="sm"
+   652→                  onClick={() => void copySnippet()}
+   653→                  className="h-9 shrink-0 gap-1.5 rounded-lg bg-violet-600 text-xs text-white hover:bg-violet-700"
+   654→                >
+   655→                  {copied ? (
+   656→                    <Check className="size-3.5" aria-hidden />
+   657→                  ) : (
+   658→                    <Copy className="size-3.5" aria-hidden />
+   659→                  )}
+   660→                  کپی کد
+   661→                </Button>
+   662→              </div>
+   663→              <Badge
+   664→                variant="outline"
+   665→                className="rounded-full border-violet-300 bg-violet-50 text-[10px] text-violet-700 dark:border-violet-500/30 dark:bg-violet-950/40 dark:text-violet-300"
+   666→              >
+   667→                سازگار با هر سایت (CORS فعال)
+   668→              </Badge>
+   669→            </div>
+   670→          </TabsContent>
+   671→
+   672→          {/* ── تب ربات بله ── */}
+   673→          <TabsContent value="bale" className="mt-4 space-y-5">
+   674→            <div className="space-y-2">
+   675→              <Label htmlFor="bale-token" className="text-sm font-semibold">
+   676→                توکن ربات بله
+   677→              </Label>
+   678→              <div className="flex gap-2">
+   679→                <div className="relative flex-1">
+   680→                  <Input
+   681→                    id="bale-token"
+   682→                    type={showToken ? "text" : "password"}
+   683→                    value={baleToken}
+   684→                    onChange={(e) => setBaleToken(e.target.value)}
+   685→                    onKeyDown={(e) => {
+   686→                      if (e.key === "Enter") {
+   687→                        e.preventDefault();
+   688→                        void setupBale();
+   689→                      }
+   690→                    }}
+   691→                    placeholder="123456:ABC-DEF..."
+   692→                    dir="ltr"
+   693→                    autoComplete="off"
+   694→                    className="h-11 rounded-xl pl-11 text-left"
+   695→                  />
+   696→                  <button
+   697→                    type="button"
+   698→                    onClick={() => setShowToken((s) => !s)}
+   699→                    aria-label={showToken ? "پنهان کردن توکن" : "نمایش توکن"}
+   700→                    className="absolute inset-y-0 left-0 flex w-11 items-center justify-center rounded-l-xl text-muted-foreground transition-colors hover:text-foreground"
+   701→                  >
+   702→                    {showToken ? (
+   703→                      <EyeOff className="size-4" aria-hidden />
+   704→                    ) : (
+   705→                      <Eye className="size-4" aria-hidden />
+   706→                    )}
+   707→                  </button>
+   708→                </div>
+   709→                <Button
+   710→                  type="button"
+   711→                  onClick={() => void setupBale()}
+   712→                  disabled={baleLoading || !baleToken.trim()}
+   713→                  className="h-11 shrink-0 gap-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700"
+   714→                >
+   715→                  {baleLoading ? (
+   716→                    <Loader2 className="size-4 animate-spin" aria-hidden />
+   717→                  ) : (
+   718→                    <Send className="size-4" aria-hidden />
+   719→                  )}
+   720→                  ثبت وب‌هوک و اتصال
+   721→                </Button>
+   722→              </div>
+   723→              <p className="text-xs leading-6 text-muted-foreground">
+   724→                با ثبت وب‌هوک، پیام‌های ربات شما از tapi.bale.ai به این سرور
+   725→                ارسال می‌شود و دستیار هوشمند به مشتریان پاسخ می‌دهد. توکن را از
+   726→                BotFather بله دریافت کنید.
+   727→              </p>
+   728→            </div>
+   729→
+   730→            {baleConnected && (
+   731→              <div className="flex items-start gap-2.5 rounded-xl border border-emerald-300 bg-emerald-50 p-3.5 text-sm text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-950/40 dark:text-emerald-300">
+   732→                <Check className="mt-0.5 size-4 shrink-0" aria-hidden />
+   733→                <div className="space-y-0.5">
+   734→                  <p className="font-semibold">
+   735→                    ربات متصل است
+   736→                    {typeof baleInfo?.username === "string" && (
+   737→                      <span dir="ltr" className="font-mono">
+   738→                        {" "}
+   739→                        @{baleInfo.username.replace(/^@/, "")}
+   740→                      </span>
+   741→                    )}
+   742→                  </p>
+   743→                  <p className="text-xs opacity-80">
+   744→                    وب‌هوک فعال است و پیام‌ها دریافت می‌شوند.
+   745→                  </p>
+   746→                </div>
+   747→              </div>
+   748→            )}
+   749→
+   750→            {!baleConnected && baleError && (
+   751→              <div className="flex items-start gap-2.5 rounded-xl border border-red-300 bg-red-50 p-3.5 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-950/40 dark:text-red-300">
+   752→                <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+   753→                <div className="space-y-0.5">
+   754→                  <p className="font-semibold">اتصال برقرار نشد</p>
+   755→                  <p className="text-xs">{baleError}</p>
+   756→                </div>
+   757→              </div>
+   758→            )}
+   759→
+   760→            {baleConnected && (
+   761→              <Badge
+   762→                variant="outline"
+   763→                className="border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-950/40 dark:text-emerald-300"
+   764→              >
+   765→                وب‌هوک فعال
+   766→              </Badge>
+   767→            )}
+   768→          </TabsContent>
+   769→        </Tabs>
+   770→      </CardContent>
+   771→    </Card>
+   772→  );
+   773→}
+   774→

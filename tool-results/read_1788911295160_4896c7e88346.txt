@@ -1,0 +1,227 @@
+     1→# کارتابل هوشمند محصول — Worklog
+     2→
+     3→پروژه: وب‌اپ فارسی RTL «ساخت خودکار کارت محصول» (خروجی مطابق نمونه upload/isadora.html)
+     4→
+     5→## قرارداد API (ثابت — فرانت و بک به این پایبند باشند)
+     6→
+     7→- `POST /api/jobs` — multipart: `inputs`(JSON string[]), `files`(File[]), `watermarkText`, `watermarkMode`(text|logo), `watermarkPos`, `watermarkLogo`(dataURL string), `useExternal`(0/1), `assistantUrl`, `assistantKey`, `assistantModel` → `{ok, jobId}`
+     8→- `POST /api/jobs/{id}/run` → `{ok}` (پایپ‌لاین در پس‌زمینه اجرا می‌شود)
+     9→- `GET /api/jobs/{id}` → `{ok, job:{id,status,currentStage,stages:[{key,title,status,logs[],startedAt,endedAt}],error,watermarkText,cards:[CardData]}}` — برای polling هر ۲ ثانیه
+    10→- `GET /api/jobs/{id}/download` → ZIP همه کارت‌های done
+    11→- `GET /api/jobs/{id}/download/{cardId}` → فایل HTML تکی
+    12→- `DELETE /api/jobs/{id}` → حذف job
+    13→- `POST /api/cards/{cardId}` — JSON: `{name?, description?, usage?, price? (عدد تومان), specs?}` → `{ok, card}` (HTML دوباره رندر می‌شود)
+    14→- `POST /api/assistant/chat` — JSON: `{sessionId, cardId?, message}` → `{ok, reply, applied: bool, card?}` — چت‌بات ویرایشگر
+    15→- `GET /api/settings` → `{ok, settings:{watermarkText, watermarkMode, watermarkPos, assistantUrl, assistantKey, assistantModel, useExternal, baleTokenSet}}`
+    16→- `POST /api/settings` — JSON همان فیلدها → `{ok}`
+    17→- `POST /api/bale/setup` — JSON `{token}` → تست getMe + setWebhook روی tapi.bale.ai → `{ok, info?, error?}`
+    18→- `POST /api/bale/hook` — وب‌هوک دریافت آپدیت بله (پیام → پاسخ LLM → sendMessage + لاگ) → `{ok}`
+    19→- `GET /api/bale/status` → `{ok, tokenSet, lastInfo?, chatSet, notify}`
+    20→- `GET /api/bale/logs?limit=30` → `{ok, logs:[{id,direction,chatId,userName,text,ok,error,createdAt}]}` — آخرین پیام‌های ربات
+    21→- `DELETE /api/bale/logs` → `{ok}` — پاک کردن همه لاگ‌ها
+    22→- `POST /api/bale/test` — JSON `{text?}` → ارسال پیام آزمایشی به چت ثبت‌شده + لاگ → `{ok}` یا خطای API بله
+    23→- `POST /api/jobs/bulk-delete` — JSON `{ids:string[]}` → `{ok, deleted}` (کارت‌ها Cascade)
+    24→- `POST /api/jobs/{id}/rerun` → ریست مراحل/کارت‌ها + اجرای مجدد پایپ‌لاین در پس‌زمینه → `{ok}`
+    25→- `GET /api/cards/{cardId}/share` → صفحه HTML عمومی کارت + متاتگ og/twitter + JSON-LD Product + نوار برند (text/html)
+    26→- `GET /api/cards/{cardId}/qr` → تصویر PNG کد QR لینک اشتراک (هدر x-share-url)
+    27→
+    28→CardData = `{id, rawInput, inputType, name, nameFa, nameEn, description, usage, price, priceValue, priceSource[], link, imageUrl, specs[], issues[], status, error}`
+    29→
+    30→## Template کارت خروجی
+    31→دقیقاً مطابق upload/isadora.html (فونت Vazirmatn، کارت 480px، تصویر مربع base64، قیمت سبز، جدول مشخصات) + بخش «روش مصرف» زرد + دکمه لینک مرجع + فوتر برند کاربر. رندر: `src/lib/card-template.ts`
+    32→
+    33→## ماژول‌های backend آماده
+    34→- `src/lib/types.ts` — قرارداد و تعریف ۶ مرحله
+    35→- `src/lib/fa.ts` — ارقام فارسی، استخراج/میانه قیمت
+    36→- `src/lib/card-template.ts` — رندر HTML نهایی
+    37→- `src/lib/ai.ts` — webSearch/llm/imageSearch(CLI z-ai)/fetchImage/parseJsonLoose
+    38→- `src/lib/watermark.ts` — sharp + SVG متن فارسی (Vazirmatn نصب شد در ~/.fonts) یا لوگو، مربع 900×900
+    39→- `src/lib/parse-input.ts` — parseLines/parseFiles(html/zip/img/txt)/parseHtmlCard/mergeSeeds
+    40→- `src/lib/pipeline.ts` — runPipeline(jobId): ۶ مرحله + لاگ زنده در stagesLog
+    41→- prisma schema: Job/Card/Setting/ChatMessage — db push شد
+    42→
+    43→## UI زبون مشترک
+    44→- تک‌صفحه `/` — فارسی RTL، فونت Vazirmatn، بدون رنگ آبی/نیلی — پالت: سبز emerald + کهربایی amber روی زمینه روشن (bg #f8fafc)
+    45→- اجزای صفحه: هدر چسبان → بخش ورودی (متن چندخطی + drag&drop فایل + لینک تصاویر) → تنظیمات (واترمارک/دستیار خارجی apikey+baseurl/ربات بله) → دکمه بزرگ «شروع پردازش» → نمایش ۶ مرحله با لاگ زنده (max-h scroll) → گالری خروجی با پیش‌نمایش iframe مقیاس‌دار + دانلود تکی/ZIP → چت‌بات ویرایشگر شناور
+    46→- فوتر چسبان پایین (min-h-screen flex flex-col + mt-auto)
+    47→---
+    48→Task ID: 2-b
+    49→Agent: frontend-styling-expert
+    50→Task: ساخت فرانت‌اند کامل تک‌صفحه‌ای RTL فارسی «کارت‌ساز هوشمند محصول» (Next.js 16 App Router) مطابق قرارداد API و زبون طراحی مشترک
+    51→
+    52→Work Log:
+    53→- `src/app/layout.tsx` — بازنویسی: dir="rtl" lang="fa"، فونت Vazirmatn از Google Fonts (wght@300..800) با preconnect، ThemeProvider (next-themes, attribute="class", defaultTheme="light")، Toaster sonner با richColors position="bottom-left"، متادیتای فارسی، body با min-h-screen flex flex-col
+    54→- `src/app/globals.css` — پالت emerald/amber روی زمینه روشن (بدون آبی/نیلی) در :root و .dark، فونت Vazirmatn به‌عنوان font-sans، ::selection سبز، اسکرول‌بار باریک سفارشی `.scrollbar-thin` (webkit + scrollbar-width) برای لیست‌های بلند
+    55→- `src/components/shared.tsx` — انواع مشترک فرانت (CardWithHtml، JobData، WatermarkConfig، AssistantConfig)، آیکون‌های ۶ مرحله، متای وضعیت مرحله/job (badgeها)، WATERMARK_POSITIONS، ابزارها: faNum (اعداد فارسی)، faFileSize، fileIcon، apiJson (fetch امن با پیام خطای فارسی)، truthy برای useExternal
+    56→- `src/components/theme-provider.tsx` + `theme-toggle.tsx` — wrapper next-themes و دکمه Sun/Moon با aria-label
+    57→- `src/components/app-header.tsx` — هدر چسبان شیشه‌ای (backdrop-blur) با آیکون Sparkles، دکمه «تنظیمات» (اسکرول به #settings) و سوییچ حالت تیره
+    58→- `src/components/hero-strip.tsx` — عنوان + توضیح ۶ گام + ۶ چیپ مرحله با انیمیشن stagger (framer-motion) و tooltip عنوان مرحله
+    59→- `src/components/input-section.tsx` — Textarea چندخطی با placeholder نمونه (ایزادورا…)، شمارنده ورودی، Drag&Drop + input file (accept html/zip/img/txt) با badge قابل‌حذف و آیکون نوع و حجم فارسی، لیست پویا «لینک مستقیم تصاویر» با اعتبارسنجی http(s)
+    60→- `src/components/settings-section.tsx` — Card «تنظیمات» با ۳ تب: ۱) واترمارک: Switch متن/لوگو، Input متن + Select موقعیت (۶ گزینه)، آپلود لوگو با پیش‌نمایش dataURL، راهنمای زنده ۲) دستیار خارجی: Switch + Base URL/Key(password)/Model + ذخیره → POST /api/settings ۳) ربات بله: Input توکن (ماسک با چشم) + «ثبت وب‌هوک و اتصال» → POST /api/bale/setup؛ GET /api/bale/status در mount؛ alert سبز/قرمز با username ربات
+    61→- `src/components/pipeline-panel.tsx` — «پروسه اجرا»: ۶ ردیف مرحله (آیکون + عنوان + badge وضعیت فارسی + نوار پیشرفت RTL سفارشی)، جعبه لاگ ترمینالی فقط برای مرحله فعال/خطا (max-h-48، font-mono، rtl، autoscroll، scrollbar-thin) با AnimatePresence، درصد کل پیشرفت با اعداد فارسی، alert خطای job
+    62→- `src/components/output-gallery.tsx` — «خروجی‌ها»: گرید واکنش‌گرا (md:2، xl:3)، پیش‌نمایش iframe مقیاس‌دار 0.55 (480px کارت، sandbox، pointer-events-none)، badge قیمت/نام لاتین، دکمه‌های دانلود HTML (/api/jobs/{id}/download/{cardId})، کپی HTML (clipboard)، ویرایش هوشمند (باز کردن چت با کارت انتخابی)، Dialog «مشاهده کامل» با پیش‌نمایش 0.85 + badgeهای راستی‌آزمایی (نام/تصویر/لینک/قیمت با ✓/✗/اصلاح شد + tooltip جزئیات) + مشخصات + منابع قیمت + روش مصرف، دکمه «دانلود ZIP همه کارت‌ها»، اسکلتون لودینگ هنگام اجرا
+    63→- `src/components/chat-widget.tsx` — دکمه شناور round emerald (bottom-left, size-14) + پنل 380×520: سربرگ سبز با کارت هدف (قابل لغو)، لیست پیام (کاربر/دستیار)، ۴ چیپ پیشنهاد سریع، ورودی + ارسال با Enter، POST /api/assistant/chat با sessionId (crypto.randomUUID در localStorage) و cardId؛ applied → badge «روی کارت اعمال شد ✓» + دکمه «به‌روزرسانی خروجی‌ها»
+    64→- `src/app/page.tsx` — orchestrator کلاینت: state خالص React، grid lg:grid-cols-3 (ورودی col-span-2)، دکمه بزرگ «شروع پردازش» با Rocket/Loader2 (غیرفعال بدون ورودی یا حین اجرا)، ساخت FormData طبق قرارداد POST /api/jobs → POST /api/jobs/{id}/run → polling هر ۲ ثانیه GET /api/jobs/{id} تا status نهایی، ذخیره/بازیابی jobId از localStorage (restore در reload)، پیش‌بارگذاری GET /api/settings، همگام‌سازی کارت انتخابی چت با داده تازه، همه fetchها relative (/api/...) و خطاها با sonner
+    65→- `src/components/site-footer.tsx` + body — فوتر چسبان پایین (mt-auto) با متن «کارت‌ساز هوشمند محصول — پردازش خودکار نام، قیمت، تصویر و محتوا» + «ساخته‌شده با ❤ برای فروشندگان فارسی‌زبان»
+    66→- رعایت کیفیت: فاصله‌گذاری p-4/p-6 و gap-4/6، rounded-xl/2xl، hover روی همه دکمه/کارت‌ها، framer-motion برای ظاهر پنل/مراحل/کارت‌ها، aria-label روی همه دکمه‌های آیکونی، اعداد فارسی (fa-IR)، حداقل h-10/h-11 برای دکمه‌های اصلی
+    67→- `bun run lint` — نهایی: 0 error / 0 warning (رفع دو هشدار اولیه: no-page-custom-font با disable directive و directive بلااستفاده)
+    68→
+    69→Stage Summary:
+    70→- ۱۲ فایل ساختهشده/بهروزرسانی شد: layout.tsx، globals.css، page.tsx + ۹ کامپوننت (shared، theme-provider، theme-toggle، app-header، site-footer، hero-strip، input-section، settings-section، pipeline-panel، output-gallery، chat-widget)
+    71→- صفحه کامل: هدر چسبان → هیرو ۶ گام → ورودی (متن/فایل/لینک تصویر) → تنظیمات ۳ تب → دکمه شروع → پروسه ۶ مرحله با لاگ زنده → گالری خروجی با پیش‌نمایش iframe و دانلود ZIP → چت شناور ویرایشگر → فوتر چسبان
+    72→- تمام قرارداد API worklog رعایت شد (jobs/run/poll/download/settings/bale/assistant)؛ بدون URL مطلق؛ polling ۲s؛ restore با localStorage؛ dark mode با next-themes
+    73→- lint: 0 خطا / 0 هشدار — بدون تغییر در prisma، src/lib/* و src/app/api/*
+    74→---
+    75→
+    76→---
+    77→Task ID: 2-a
+    78→Agent: main (Z.ai Code)
+    79→Task: Backend — pipeline engine + all API routes per contract
+    80→
+    81→Work Log:
+    82→- Prisma schema (Job/Card/Setting/ChatMessage) → db push OK
+    83→- src/lib: types.ts, fa.ts (Persian digits/price extraction), card-template.ts (isadora.html clone), ai.ts (webSearch/llm/imageSearch CLI/fetchImage), watermark.ts (sharp SVG), parse-input.ts (lines/html/zip/img/txt), pipeline.ts (6 stages with live logs)
+    84→- API routes: POST /api/jobs (multipart), POST /api/jobs/[id]/run (background runPipeline), GET+DELETE /api/jobs/[id], GET /api/jobs/[id]/download (ZIP via jszip), GET /api/jobs/[id]/download/[cardId] (single HTML), POST /api/cards/[cardId] (manual edit + re-render), POST /api/assistant/chat (internal z-ai LLM OR external OpenAI-compatible apikey/baseurl; __EDITS__ protocol applies edits to card), GET/POST /api/settings, POST /api/bale/setup (getMe + setWebhook on tapi.bale.ai), GET /api/bale/status (lastInfo key), POST /api/bale/hook (receives Bale updates → LLM → sendMessage)
+    85→- Fixed: Prisma priceValue Int vs String in cards + assistant routes
+    86→- Fixed watermark SVG: removed direction attr, text-anchor middle, generous pill sizing (librsvg renders Persian via pango correctly — verified visually)
+    87→- Vazirmatn font installed to ~/.fonts for watermark rendering + copied to public/fonts
+    88→
+    89→Stage Summary:
+    90→- E2E API test passed: 1-product job (Isadora mascara) done in ~60s all 6 stages; 2-product job (Dermacol SPF50 + Sinerre shampoo) done with diagonal watermark, prices from search median
+    91→- Assistant chat applies edits (price ۳۹۰٬۰۰۰ confirmed), ZIP + single HTML downloads verified
+    92→
+    93→---
+    94→Task ID: 3 & 4
+    95→Agent: main (Z.ai Code)
+    96→Task: Integration + agent-browser end-to-end QA
+    97→
+    98→Work Log:
+    99→- agent-browser desktop (1440×900): page renders RTL Persian, hero + 6 stage chips, two-column workspace, emerald/amber palette, sticky footer verified (min-h-screen flex-col + mt-auto)
+   100→- Golden path in UI: filled product name «ادکلن مردانه لاکوست L.12.12 بلو» + watermark «فروشگاه نمونه» → شروع پردازش → live 6-stage progress with logs → output gallery with scaled iframe preview, price badge, دانلود HTML / کپی / ویرایش هوشمند / مشاهده کامل / دانلود ZIP
+   101→- Chat widget E2E: «ویرایش هوشمند» → message → applied ✓ badge → outputs refreshed showing new price ۲,۲۲۰٬۰۰۰ + short description + روش مصرف section
+   102→- Dark mode toggle verified visually
+   103→- Mobile (iPhone 14 viewport): single column, responsive, footer pushed naturally (docH 3700, footerTop 3599)
+   104→- File upload flow: uploaded isadora.html inside ZIP → parseHtmlCard extracted title/desc/img/specs/usage → full pipeline rebuild → watermark top-left/bottom-right verified visually
+   105→- BUG FIX 1: watermark SVG Persian text clipped/disconnected → removed direction attr + middle anchor + generous pill (librsvg/pango), verified «فروشگاه نمونه» renders perfectly (corner badge + diagonal repeat)
+   106→- BUG FIX 2: Prisma priceValue Int vs String in cards/[cardId] and assistant/chat routes
+   107→- BUG FIX 3: parsedPrice early-continue skipped DB save in stagePricing → price now persists (verified ۲۹۰٬۰۰۰ تومان in DB)
+   108→- bun run lint: 0 errors / 0 warnings; tsc clean in src/
+   109→
+   110→Stage Summary:
+   111→- Project is production-ready: full pipeline (upload/paste → start → 6 auto stages → download HTML/ZIP), chat editor bot, external assistant apikey/baseurl, Bale bot webhook management
+   112→- All outputs match the isadora.html reference structure with additions: روش مصرف block, reference link button, brand footer
+   113→
+   114→---
+   115→Task ID: r2 (cron webDevReview round 2)
+   116→Agent: main (Z.ai Code)
+   117→Task: QA pass + ۳ قابلیت جدید + پالایش استایل
+   118→
+   119→Work Log:
+   120→- QA اولیه: dev server سلامت، بدون خطای runtime جدید (matches قبلی فقط نام ستون error در لاگ prisma بود)؛ سرور یک‌بار down شده بود → restart شد
+   121→- قابلیت ۱ — ویرایشگر دستی کارت (`card-editor-dialog.tsx`): فرم کامل نام/قیمت/توضیح/روش‌مصرف/جدول مشخصات (افزودن/حذف ردیف) → POST /api/cards/{id} → بازسازی HTML + به‌روزرسانی درجای گالری (applyCardUpdate در page.tsx)؛ دکمه «تصویر تازه» داخل دیالوگ
+   122→- قابلیت ۲ — تاریخچه پروسه‌ها: GET /api/jobs (لیست ۲۰ شغل آخر با شمار کارت‌ها و نمونه نام‌ها) + `job-history.tsx` (Collapsible با badge وضعیت فارسی، تاریخ fa-IR، بازکردن/حذف، فعال highlight، انیمیشن layout)؛ بازکردن → load job + localStorage + اسکرول به پروسه؛ refresh خودکار پس از اتمام پردازش (historyKey)
+   123→- قابلیت ۳ — تازه‌سازی تصویر: POST /api/cards/[cardId]/image (جستجوی تصویر جدید + واترمارک با تنظیمات شغل + رندر مجدد)؛ تست API موفق: تصویر ۱۵۸KB → ۲۵۲KB
+   124→- پالایش استایل (hero-strip.tsx): تیتر گرادیانی emerald→amber، badge «خط تولید هوشمند ۶ مرحله‌ای»، دو لکه نور blur تزئینی، بافت نقطه‌ای ظریف، شماره‌گذاری چیپ‌های مراحل، backdrop-blur روی چیپ‌ها
+   125→- چیدمان دکمه‌های کارت خروجی: دانلود/کپی، هوشمند/دستی، مشاهده کامل (col-span-2)
+   126→- رفع: lucide `ImageRefresh` موجود نیست → `ImagePlus`
+   127→- تست مرورگر: پنل تاریخچه با داده واقعی (۱۷/۱۷ کارت، ۳ شغل) ✓، بازکردن شغل از تاریخچه ✓، دیالوگ ویرایش دستی با پیش‌پرشدن فیلدها ✓، ذخیره قیمت ۲۹۰٬۰۰۰→۳۱۵٬۰۰۰ و به‌روزرسانی زنده پیش‌نمایش ✓، toastهای فارسی ✓، موبایل OK
+   128→- lint: 0 خطا/0 هشدار؛ tsc src: 0 خطا
+   129→
+   130→Stage Summary:
+   131→- سه قابلیت جدید فعال شد: ویرایشگر دستی کارت، تاریخچه پروسه‌ها (بازکردن/حذف)، تصویر تازه با واترمارک
+   132→- API جدید: GET /api/jobs، POST /api/cards/[cardId]/image — قرارداد در همین فایل ثبت شد
+   133→- پیشنهاد دور بعد: تم‌های رنگی قالب کارت (چند تم برای buildProductHtml)، خروجی JSON ساختاریافته کنار HTML، صفحه/ویجت embed عمومی برای چت‌بات (script tag)، صف پردازش همزمان چند شغل
+   134→
+   135→---
+   136→Task ID: r3 (cron webDevReview round 3)
+   137→Agent: main (Z.ai Code)
+   138→Task: QA کامل با agent-browser + سه قابلیت جدید (تم رنگی کارت، خروجی JSON، ویجت embed) + پالایش استایل
+   139→
+   140→Work Log:
+   141→- QA اولیه: صفحه دسکتاپ/موبایل سالم، تاریخچه و گالری و دیالوگ‌ها کار می‌کنند، بدون خطای کنسول؛ سرور یک‌بار برای بارگذاری Prisma client جدید restart شد (schema push)
+   142→- قابلیت ۱ — تم‌های رنگی قالب کارت: `src/lib/card-themes.ts` با ۶ تم کامل (زمردی/سرخابی/بنفش/طلایی/فیروزه‌ای/شبانه-تیره) شامل همه رنگ‌های بلاک‌ها (قیمت، روش مصرف، جدول، دکمه لینک، فوتر)؛ `card-template.ts` تم‌دار شد؛ فیلد `cardTheme` روی Job + فیلد `theme` (اختصاصی هر کارت) روی Card در Prisma؛ pipeline از تم job در stageBuild استفاده می‌کند؛ POST /api/cards/[cardId] پارامتر `theme` می‌پذیرد (بازرندر با تم کارت یا job)؛ API تصویر تازه هم تم را حفظ می‌کند
+   143→- UI تم: تب جدید «قالب کارت» در تنظیمات با گرید ۶ کارت تم هرکدام با پیش‌نمایش مینیاتوری رنگی + انتخاب فوری با ذخیره خودکار؛ تم‌پیکر چیپی در دیالوگ ویرایش دستی؛ badge «تم X» روی کارت‌های خروجی
+   144→- قابلیت ۲ — خروجی JSON ساختاریافته: `src/lib/card-json.ts` (CardJson: name دو‌زبانه، price با currency IRT و منابع، specs، verification، theme، image dataUrl، files)؛ دانلود تکی `GET /api/jobs/{id}/download/{cardId}?format=json`؛ ZIP حالا شامل HTML + JSON هم‌نام هر کارت + `cards.json` تجمیعی + README به‌روزشده؛ دکمه «دانلود JSON» در گالری (گرید ۲×۳) و دیالوگ مشاهده کامل
+   145→- قابلیت ۳ — ویجت embed عمومی: `src/lib/embed-widget-source.ts` (ویجت self-contained با shadow DOM، RTL، فونت وزیرمتن، پیام خوش‌آمد، چیپ‌های پیشنهادی، typing indicator، session در localStorage)؛ `GET /api/embed/widget.js` با پارامترهای query/data-attr: title/welcome/pos(left|right)/accent/#hex/origin؛ CORS کامل روی POST /api/assistant/chat (OPTIONS 204 + Access-Control-Allow-Origin: *)؛ بخش «ویجت چت برای وب‌سایت شما» در تب دستیار با snippet آماده + دکمه کپی؛ صفحه دمو `public/widget-demo.html`
+   146→- رفع باگ ۱: نشت بلوک خام `__EDITS__` در پاسخ چت هنگام نبود cardId (ویجت) — حالا همیشه از پاسخ حذف می‌شود و فقط با کارت اعمال می‌شود
+   147→- رفع باگ ۲: overrideهای query ویجت بعد از خواندن متغیرها اعمال می‌شدند → انتقال تزریق به بلافاصله بعد از یافتن script
+   148→- رفع باگ ۳: ترتیب @import فونت در shadow DOM (باید اول باشد)
+   149→- رفع باگ ۴: TS خطای `job` used-before-declaration در cards/[cardId] → card.job.cardTheme
+   150→- پالایش استایل: تایمر زنده هر مرحله پایپ‌لاین (Timer icon + مدت فارسی با ثانیه‌شمار متحرک)، badge تم روی کارت‌ها، متن ZIP جدید در توضیح خروجی‌ها
+   151→- تست‌ها: تم بنفش از تنظیمات → job جدید Ray-Ban → HTML با رنگ‌های بنفش + badge تم + قیمت ۹,۹۹۰,۰۰۰ ✓؛ تغییر تم دستی کارت به فیروزه‌ای → toast فارسی + بازرندر زنده ✓؛ JSON دانلود ساختار صحیح (specs:11, verification:4, image embedded) ✓؛ ZIP شامل ۴ فایل (html/json/cards.json/README) ✓؛ ویجت روی صفحه دمو: عنوان سفارشی «پشتیبانی فروشگاه» + گفتگوی کامل با پاسخ LLM بدون نشت __EDITS__ ✓؛ dark mode + موبایل ✓
+   152→- lint: 0 خطا/0 هشدار؛ tsc src: 0 خطا
+   153→
+   154→Stage Summary:
+   155→- سه قابلیت جدید فعال و تست‌شده: ۶ تم رنگی قالب (سطح job + اختصاصی کارت)، خروجی JSON ساختاریافته (تکی + ZIP + cards.json)، ویجت چت embed عمومی با CORS
+   156→- API جدید/تغییرکرده: cardTheme در POST /api/jobs و GET/POST /api/settings؛ theme در POST /api/cards/[cardId] و GET /api/jobs/[id]؛ ?format=json در دانلود تکی؛ GET /api/embed/widget.js؛ OPTIONS /api/assistant/chat
+   157→- فایل‌های جدید: src/lib/card-themes.ts، src/lib/card-json.ts، src/lib/embed-widget-source.ts، src/app/api/embed/widget.js/route.ts، public/widget-demo.html
+   158→- پیشنهاد دور بعد: اعمال گروهی تم روی همه کارت‌های یک job با یک دکمه، صف همزمان چند job، پیش‌نمایش زنده تم در تنظیمات قبل از اجرا، چند زبانه کردن کارت خروجی (fa/en)، آمار داشبوردی (تعداد کارت‌ها/میانگین قیمت)
+   159→
+   160→---
+   161→Task ID: r4 (cron webDevReview round 4)
+   162→Agent: main (Z.ai Code)
+   163→Task: QA با agent-browser + سه قابلیت جدید (اعمال گروهی تم، داشبورد آماری، پیش‌نمایش زنده تم) + پالایش استایل
+   164→
+   165→Work Log:
+   166→- QA اولیه: سرور سالم (HTTP 200)، صفحه دسکتاپ بدون خطای کنسول، ۶ پروسه done در تاریخچه، گالری/تاریخچه/فوتر چسبان سالم
+   167→- قابلیت ۱ — اعمال گروهی تم: `POST /api/jobs/[id]/theme` با body `{theme}` → به‌روزرسانی cardTheme شغل + همه کارت‌ها و بازرندر کامل HTML هر کارت با تم جدید (کارت‌های ناتمام فقط تم ذخیره می‌کنند) → `{ok, theme, updated}`؛ UI: `BulkThemePopover` در سربرگ گالری خروجی (کنار دکمه ZIP) با گرید ۶ تم، اسپینر هنگام اعمال، toast فارسی «تم «X» روی N کارت اعمال شد»، سپس refetch خودکار job + بروزرسانی StatsBar
+   168→- قابلیت ۲ — داشبورد آماری: `GET /api/stats` → jobsTotal/jobsDone، cardsTotal/cardsDone، pricedCount، avgPrice/minPrice/maxPrice، themeDist (توزیع تم‌ها با swatch)، topTheme، week (۷ روز اخیر با شمار پروسه هر روز)؛ کامپوننت جدید `stats-bar.tsx`: ۵ کاشی (کارت آماده، پروسه موفق، میانگین قیمت، تم محبوب، نمودار میله‌ای ۷ روزه) با شمارنده متحرک rAF (useCountUp با easing)، هاور لکه نور، اسکلتون لودینگ، tooltip بومی نمودار + عدد فارسی بالای میله فعال؛ جای‌گیری: زیر هیرو، refresh با historyKey (پس از اتمام job و اعمال تم گروهی)
+   169→- قابلیت ۳ — پیش‌نمایش زنده تم: `GET /api/card-preview?theme=X` → HTML کارت نمونه (کرم آفتاب فارما پیور با تصویر SVG داخلی base64 — بدون نیاز به اینترنت، ۴ مشخصه، روش مصرف، لینک، برند «فروشگاه نمونه»)؛ UI در تب «قالب کارت» تنظیمات: پنل پیش‌نمایش با سربرگ chrome مانند (سه نقطه رنگی + عنوان «پیش‌نمایش زنده — تم X»)، iframe مقیاس 0.62 با پس‌زمینه تطبیقی (تیره برای تم شبانه)، کش سمت کلاینت (Map در useRef)، hover/focus روی چیپ تم → تعویض فوری پیش‌نمایش، hint راهنما
+   170→- پالایش استایل: بازطراحی WeekChart (میله‌های flex-1 با ارتفاع درصدی، ردیف برچسب روز جداست، اعداد فارسی روی میله‌ها، title بومی)، دکمه «تغییر گروهی تم» outline زمردی هماهنگ با دکمه ZIP، رفع تداخل برچسب‌های نمودار موبایل
+   171→- تست E2E با agent-browser: StatsBar با داده واقعی (۷ کارت/۶ پروسه/میانگین ۲,۱۴۳,۵۰۰/تم زمردی/نمودار هفتگی) ✓، پیش‌نمایش زنده: hover سرخابی → سربرگ و قالب تغییر فوری ✓، Popover تم گروهی → کلیک شبانه → job+card در DB به midnight تغییر کرد، پیش‌نمایش کارت تیره شد، badge «تم شبانه» ✓، بازگردانی به بنفش با همان API ✓، موبایل 390px: کاشی‌ها ۲ ستونه، نمودار full-width ✓
+   172→- نکته تست: کلیک با ref قدیمی popover ممکن است به چیپ هم‌نام تنظیمات برسد (portal) — در تست از snapshot تازه استفاده شد
+   173→- lint: 0 خطا/0 هشدار؛ tsc src: 0 خطا (خطاهای examples/skills از قبل موجود و خارج از اپ هستند)
+   174→
+   175→Stage Summary:
+   176→- سه قابلیت جدید فعال و تست‌شده: اعمال گروهی تم روی همه کارت‌های پروسه، داشبورد آماری با شمارنده متحرک و نمودار هفتگی، پیش‌نمایش زنده تم در تنظیمات
+   177→- API جدید: POST /api/jobs/[id]/theme، GET /api/stats، GET /api/card-preview?theme=
+   178→- فایل‌های جدید: src/app/api/stats/route.ts، src/app/api/jobs/[id]/theme/route.ts، src/app/api/card-preview/route.ts، src/components/stats-bar.tsx
+   179→- فایل‌های تغییرکرده: output-gallery.tsx (BulkThemePopover + prop onBulkThemeApplied)، settings-section.tsx (پنل پیش‌نمایش زنده + hover sync)، page.tsx (StatsBar + wiring)
+   180→- پیشنهاد دور بعد: صف همزمان چند job، خروجی چندزبانه (fa/en) کارت، انتخاب قلم/اندازه فونت واترمارک، مرتب‌سازی/جستجو در گالری خروجی، اعلان Bale پس از اتمام هر پروسه (ارسال خلاصه کارت‌ها به ربات)
+   181→
+   182→---
+   183→Task ID: r5 (cron webDevReview round 5)
+   184→Agent: main (Z.ai Code)
+   185→Task: QA با agent-browser + سه قابلیت جدید (اعلان بله، جستجو/مرتب‌سازی/CSV گالری، اندازه واترمارک + پیش‌نمایش زنده) + رفع شکاف UX
+   186→
+   187→Work Log:
+   188→- QA اولیه: سرور سالم (HTTP 200)، بدون خطای کنسول در دسکتاپ/موبایل، فوتر چسبان سالم (footerBottom ≈ docH)
+   189→- قابلیت ۱ — اعلان پایان پردازش در بله: `src/lib/bale-notify.ts` جدید (rememberBaleChatId + buildJobMessage + notifyJobDone؛ هرگز خطا پرتاب نمی‌کند)؛ وب‌هوک بله حالا chat.id پیام کاربر را در Setting `baleChatId` ثبت می‌کند؛ پایان pipeline (done و error) خلاصه فارسی (مدت، برند، لیست کارت‌ها با قیمت، شمار آماده، لینک اپ با env APP_ORIGIN) به چت ثبت‌شده می‌فرستد؛ فیلدهای تنظیمات جدید: baleNotify (سوییچ) + baleChatSet در GET /api/settings و GET /api/bale/status؛ سوییچ «اعلان پایان پردازش در بله» در تب ربات بله با ذخیره فوری و راهنمای پویا
+   190→- قابلیت ۲ — جستجو/مرتب‌سازی/CSV در گالری خروجی: نوار ابزار جدید در سربرگ خروجی‌ها (فقط با بیش از ۲ کارت): جعبه جستجوی فارسی/لاتین با دکمه پاک‌کردن، Select مرتب‌سازی (پیش‌فرض/نام/ارزان‌ترین/گران‌ترین با localeCompare فارسی)، دکمه «خروجی CSV» سمت کلاینت (BOM UTF-8 + هدر فارسی: نام/نام لاتین/قیمت/لینک/تم/تعداد مشخصات/روش مصرف — سازگار با اکسل)؛ حالت خالی جستجو با دکمه بازنشانی
+   191→- قابلیت ۳ — اندازه واترمارک + پیش‌نمایش زنده: WatermarkOptions.scale جدید (small 0.75 / medium 1 / large 1.35) روی متن (قرص گوشه، مرکز، مورب) و لوگو؛ ستون watermarkSize روی Job (db push)؛ POST /api/jobs و مسیر تصویر تازه کارت از آن استفاده می‌کنند؛ Select اندازه در تب واترمارک؛ API جدید `GET /api/watermark-preview?text=&pos=&size=` (تصویر نمونه گرادیانی SVG + واترمارک واقعی sharp، کش ۱ ساعت)؛ پنل «پیش‌نمایش زنده واترمارک» با قاب مرورگر در تب واترمارک — آپدیت با debounce ۳۵۰ms روی تغییر متن/موقعیت/اندازه
+   192→- رفع شکاف UX: تنظیمات واترمارک (متن/موقعیت/اندازه) قبلاً فقط با دکمه ذخیره تب دستیار ذخیره می‌شد → حالا ذخیره خودکار با debounce ۹۰۰ms (با گارد اولین اجرا)
+   193→- تست E2E با agent-browser: پیش‌نمایش زنده واترمارک (متن «گالری عصر جدید» → پایین-راست؛ سپس مرکز + بزرگ → آپدیت فوری) ✓؛ job ۳ محصولی کامل (عینک/ساعت/هدفون) با واترمارک بزرگ مرکزی روی هر ۳ تصویر در DB و گالری ✓ (قیمت‌ها: ۹۷۰,۰۰۰ / ۶,۳۵۶,۵۰۰ / ۳,۹۹۸,۹۵۰)؛ جستجو «هدفون» → ۱ کارت ✓؛ مرتب‌سازی گران‌ترین اول → ترتیب صحیح ✓؛ دانلود CSV واقعی (cards-*.csv با BOM و ۳ ردیف) ✓؛ auto-save واترمارک (تایپ → GET /api/settings تایید) ✓؛ roundtrip baleNotify با curl ✓؛ regression چت دستیار (ok, بدون applied) ✓؛ موبایل 390px بدون overflow-X ✓
+   194→- نکته: پیش‌نمایش زنده تم و واترمارک هر دو فقط در حالت متن واترمارک فعال‌اند؛ حالت لوگو پیش‌نمایش ندارد (لوگو dataURL سشن است)
+   195→- lint: 0 خطا/0 هشدار؛ tsc src: 0 خطا (خطاهای skills/ از قبل موجود و خارج از اپ)
+   196→
+   197→Stage Summary:
+   198→- سه قابلیت جدید فعال و تست‌شده: اعلان پایان پردازش در بله (ثبت خودکار chatId + سوییچ)، جستجو/مرتب‌سازی/خروجی CSV گالری، اندازه واترمارک با پیش‌نمایش زنده سمت سرور
+   199→- API جدید/تغییرکرده: GET /api/watermark-preview؛ baleNotify+baleChatSet در /api/settings و /api/bale/status؛ watermarkSize در POST /api/jobs و ستون Job
+   200→- فایل‌های جدید: src/lib/bale-notify.ts، src/app/api/watermark-preview/route.ts
+   201→- فایل‌های تغییرکرده: watermark.ts (scale+sampleImage)، pipeline.ts (scale+notify)، jobs/route.ts، settings/route.ts، bale/hook+status، cards/[cardId]/image، shared.tsx (WatermarkConfig.size + WATERMARK_SIZE_OPTIONS)، settings-section.tsx (انتخاب اندازه + پیش‌نمایش زنده + auto-save + سوییچ اعلان)، output-gallery.tsx (نوار ابزار + CSV)، page.tsx (wiring)
+   202→- پیشنهاد دور بعد: صف همزمان چند job، خروجی چندزبانه (fa/en) کارت، صفحه مدیریت وب‌هوک بله با لاگ پیام‌ها، انتخاب فونت واترمارک، حذف گروهی کارت‌ها/پروسه‌ها
+   203→
+   204→---
+   205→Task ID: r6 (cron webDevReview round 6)
+   206→Agent: main (Z.ai Code)
+   207→Task: QA با agent-browser + سه قابلیت جدید (اشتراک‌گذاری کارت با QR، حذف گروهی/اجرای مجدد پروسه، لاگ پیام‌های بله + پیام آزمایشی) + پالایش استایل
+   208→
+   209→Work Log:
+   210→- QA اولیه: سرور سالم (HTTP 200)، صفحه دسکتاپ بدون خطای کنسول، ۷ پروسه در تاریخچه، statsbar/galery/فوتر سالم → پروژه پایدار؛ تمرکز روی قابلیت جدید
+   211→- قابلیت ۱ — اشتراک‌گذاری کارت: `GET /api/cards/[cardId]/share` (همان HTML کارت + تزریق متاتگ‌های og/twitter + JSON-LD Product با قیمت IRR برای سئو + نوار ثابت برند «ساخته‌شده با کارت‌ساز هوشمند محصول»)؛ `GET /api/cards/[cardId]/qr` (PNG 512px با پکیج qrcode، رنگ سبز تیره، هدر x-share-url، آدرس از هدرهای درخواست)؛ دیالوگ `ShareCardDialog` در گالری (دکمه «اشتراک‌گذاری» روی هر کارت + داخل دیالوگ مشاهده کامل) شامل QR پیش‌نمایش، لینک عمومی با کپی، باز کردن صفحه، دانلود QR
+   212→- قابلیت ۲ — حذف گروهی + اجرای مجدد پروسه: `POST /api/jobs/bulk-delete` ({ids} → deleteMany Cascade)؛ `POST /api/jobs/[id]/rerun` (ریست stagesLog/status/کارت‌ها به pending + runPipeline در پس‌زمینه — داده‌های قبلی کارت به‌عنوان سرنخ حفظ می‌شود)؛ UI تاریخچه: چک‌باکس انتخاب هر ردیف، نوار قرمز حذف گروهی با انیمیشن (شمار انتخاب + لغو + دکمه حذف)، دکمه بنفش «اجرای مجدد» برای jobهای done/error دارای کارت، هایلایت قرمز ردیف انتخاب‌شده
+   213→- قابلیت ۳ — لاگ پیام‌های ربات بله: مدل `BaleLog` جدید در Prisma (direction in/out، chatId، userName، text، ok، error)؛ وب‌هوک بله حالا پیام ورودی (با نام فرستنده از from) و خروجی (وضعیت/خطای sendMessage) را لاگ می‌کند؛ `GET/DELETE /api/bale/logs`؛ `POST /api/bale/test` (ارسال پیام آزمایشی به chatId ثبت‌شده + لاگ نتیجه)؛ UI تب بله: کارت «پیام آزمایشی» با دکمه ارسال (فقط با چت ثبت‌شده)، پنل جمع‌شونده «لاگ پیام‌های ربات» با badge شمار پیام، آیکون فلش جهت‌دار ورودی/خروجی، زمان فارسی، badge «خطا» و متن خطای API بله، دکمه‌های نوسازی/پاک‌کردن لاگ
+   214→- رفع باگ ۱ ( hydration): دکمه‌های تودرتو در سربرگ پنل لاگ بله (button داخل button) → بازسازی به div + دو دکمه مجزا؛ کنسول پس از رفرش کاملاً پاک شد
+   215→- رفع باگ ۲: خطای TS `from` روی edited_message در bale/hook → تعریف from روی هر دو وریانت + interface BaleUser
+   216→- رفع باگ ۳: db.baleLog undefined بعد از db push → restart سرور برای Prisma client جدید
+   217→- پالایش استایل: هاله گرادیانی متحرک (emerald→amber blur) دور دکمه «شروع پردازش» وقتی ورودی آماده است + گرادیان دکمه؛ badge قیمت کارت خروجی با آیکون سکه و گرادیان و سایه؛ هدر گالری با گرادیان سه‌رنگ + دو لکه نور blur + عناصر relative؛ حالت خالی تاریخچه با آیکون Inbox در قاب سایه‌دار و متن راهنما؛ دکمه «اجرای مجدد» بنفش هماهنگ با آیکون تاریخچه
+   218→- تست‌های E2E با agent-browser: دیالوگ اشتراک‌گذاری (QR سبز رندر شد + لینک localhost قابل کپی + دکمه‌ها) ✓؛ صفحه share در مرورگر: کارت کامل + واترمارک + نوار برند پایین ثابت ✓؛ متاتگ‌های og در سورس ✓؛ انتخاب چک‌باکس تاریخچه → نوار قرمز حذف گروهی ✓؛ اجرای مجدد از UI → job به running رفت، اسکلتون گالری، اتمام در ۲۱ ثانیه با ۳ کارت done ✓؛ bulk-delete API با job آزمایشی: created → deleted → 404 ✓؛ تب بله با توکن QA موقت: کارت «ربات متصل است» + دکمه پیام آزمایشی (خطای واقعی API بله «Token not found» در لاگ ثبت شد) + پنل لاگ با ۵ پیام نمونه (ورودی سبز/خروجی سفید/خطا قرمز) ✓؛ پس از تست، توکن و لاگ‌های QA پاک شدند ✓؛ موبایل 390px بدون overflow-X، فوتر چسبان ✓؛ دارک‌مود همه عناصر جدید ✓؛ کنسول پاک ✓
+   219→- lint: 0 خطا/0 هشدار؛ tsc src: 0 خطا (فقط خطای قدیمی skills/ خارج از اپ)
+   220→
+   221→Stage Summary:
+   222→- سه قابلیت جدید فعال و تست‌شده: اشتراک‌گذاری عمومی کارت (لینک سئو شده + QR PNG)، حذف گروهی و اجرای مجدد پروسه از تاریخچه، لاگ پیام‌های ربات بله + پیام آزمایشی
+   223→- API جدید: GET /api/cards/[cardId]/share، GET /api/cards/[cardId]/qr، POST /api/jobs/bulk-delete، POST /api/jobs/[id]/rerun، GET+DELETE /api/bale/logs، POST /api/bale/test
+   224→- فایل‌های جدید: src/app/api/cards/[cardId]/share/route.ts، src/app/api/cards/[cardId]/qr/route.ts، src/app/api/jobs/bulk-delete/route.ts، src/app/api/jobs/[id]/rerun/route.ts، src/app/api/bale/logs/route.ts، src/app/api/bale/test/route.ts
+   225→- فایل‌های تغییرکرده: prisma/schema.prisma (+BaleLog)، src/app/api/bale/hook/route.ts (لاگ in/out + userName)، src/components/output-gallery.tsx (ShareCardDialog + استایل)، src/components/job-history.tsx (انتخاب گروهی + اجرای مجدد + حالت خالی)، src/components/settings-section.tsx (BaleLogsPanel + پیام آزمایشی)، src/app/page.tsx (rerunJobFromHistory + هاله دکمه)
+   226→- پیشنهاد دور بعد: صف همزمان چند job با نمایش موازی، خروجی چندزبانه (fa/en) کارت، انتخاب فونت/وزن متن واترمارک، جستجوی سراسری کارت‌ها بین همه پروسه‌ها، برگه «کتابخانه کارت‌ها» (همه کارت‌های همه jobها در یک گرید)
+   227→

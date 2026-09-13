@@ -1,0 +1,50 @@
+# Dependencies (installed during build)
+node_modules
+node_modules/.cache
+
+# Build artifacts
+.next
+.out
+.wrangler
+wrangler.lock
+
+# Local development
+.git
+.gitignore
+.gitattributes
+.eslintcache
+
+# Environment files (set via Docker ENV / Worker vars)
+.env
+.env.local
+
+# Logs
+*.log
+dev.log
+dev.out.log
+server.log
+test
+prompt
+
+# Local database (recreated via prisma db push in container)
+db/custom.db
+db/migrations-init
+
+# OS files
+.DS_Store
+Thumbs.db
+*.pem
+
+# IDE/Editor config
+.claude
+.z-ai-config
+*.tsbuildinfo
+next-env.d.ts
+local-*
+
+# Non-essential directories
+tool-results
+examples
+mini-services-dist
+coverage
+.zscripts

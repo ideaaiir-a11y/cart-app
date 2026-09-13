@@ -1,0 +1,99 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// کارتابل هوشمند محصول — مدل داده
+// ─────────────────────────────────────────────────────────────
+
+// هر «Job» یک دور اجرای کامل پروسه (یک یا چند محصول) است
+model Job {
+  id            String   @id @default(cuid())
+  status        String   @default("pending") // pending | running | done | error
+  currentStage  String   @default("")        // key مرحله جاری
+  stagesLog     String   @default("[]")      // JSON: [{key,title,status,logs[],startedAt,endedAt}]
+  watermarkText String   @default("")
+  watermarkPos  String   @default("bottom-right")
+  watermarkMode String   @default("text") // text | logo
+  watermarkLogo String   @default("")     // data URL لوگو
+  watermarkSize String   @default("medium") // small | medium | large
+  watermarkFont String   @default("vazirmatn") // vazirmatn | vazirmatn-black | lalezar | amiri
+  cardTheme     String   @default("emerald") // تم رنگی قالب کارت
+  priceMarkup   Int      @default(0)   // حاشیه سود قیمت‌گذاری (درصد ۰ تا ۹۰)
+  priceRound    Int      @default(1000) // رُند کردن قیمت نهایی (۰ = بدون رُند)
+  assistantUrl  String   @default("")     // baseurl دستیار خارجی
+  assistantKey  String   @default("")     // apikey دستیار خارجی
+  assistantModel String  @default("")
+  useExternal   Boolean  @default(false)
+  error         String   @default("")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  cards         Card[]
+}
+
+// کارت محصول نهایی — خروجی شبیه نمونه isadora
+model Card {
+  id          String   @id @default(cuid())
+  jobId       String
+  job         Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  rawInput    String   @default("") // ورودی خام خط (نام/لینک)
+  inputType   String   @default("name") // name | link | image | html
+  name        String   @default("") // عنوان نهایی دوزبانه
+  nameFa      String   @default("")
+  nameEn      String   @default("")
+  description String   @default("") // توضیح بهینه‌شده فارسی
+  usage       String   @default("") // روش مصرف
+  price       String   @default("") // قیمت قالب‌بندی‌شده با ارقام فارسی
+  priceValue  Int      @default(0)  // مقدار عددی تومان
+  priceSource String   @default("[]") // JSON منابع قیمت [{site,price,url}]
+  priceHistory String  @default("[]") // JSON تاریخچه قیمت [{value,at,src}] — قیمت‌نگار
+  link        String   @default("") // لینک مرجع/محصول
+  imageUrl    String   @default("") // data:base64 یا https
+  specs       String   @default("[]") // JSON [{key,value}]
+  html        String   @default("") // فایل HTML نهایی کارت (فارسی)
+  descriptionEn String @default("") // توضیح انگلیسی (نسخه دومزبانه)
+  usageEn     String   @default("") // روش مصرف انگلیسی
+  specsEn     String   @default("[]") // JSON [{key,value}] انگلیسی
+  htmlEn      String   @default("") // فایل HTML نسخه انگلیسی (چپ‌به‌راست)
+  theme       String   @default("") // تم اختصاصی کارت (خالی = تم پروسه)
+  tags        String   @default("[]") // JSON آرایه برچسب‌ها ["آرایشی","پرفروش"]
+  issues      String   @default("[]") // JSON گزارش راستی‌آزمایی [{item,ok,fixed,detail}]
+  status      String   @default("pending") // pending | processing | done | error
+  error       String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// تنظیمات ماندگار کاربر (واترمارک، دستیار، ربات بله)
+model Setting {
+  key       String   @id
+  value     String   @default("")
+  updatedAt DateTime @updatedAt
+}
+
+// پیام‌های چت‌بات ویرایشگر
+model ChatMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  cardId    String   @default("")
+  role      String // user | assistant
+  content   String
+  createdAt DateTime @default(now())
+}
+
+// لاگ پیام‌های ربات بله (ورودی از وب‌هوک / خروجی ارسالی)
+model BaleLog {
+  id        String   @id @default(cuid())
+  direction String   // in | out
+  chatId    String   @default("")
+  userName  String   @default("")
+  text      String   @default("")
+  ok        Boolean  @default(true)
+  error     String   @default("")
+  createdAt DateTime @default(now())
+}

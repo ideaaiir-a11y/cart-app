@@ -1,0 +1,842 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import { motion } from "framer-motion";
+     5→import {
+     6→  ArrowDownWideNarrow,
+     7→  Braces,
+     8→  Check,
+     9→  CheckCircle2,
+    10→  Coins,
+    11→  Copy,
+    12→  Download,
+    13→  ExternalLink,
+    14→  FileArchive,
+    15→  FileSpreadsheet,
+    16→  Loader2,
+    17→  Maximize2,
+    18→  PaintBucket,
+    19→  QrCode,
+    20→  Search,
+    21→  Share2,
+    22→  Wand2,
+    23→  X,
+    24→} from "lucide-react";
+    25→import { toast } from "sonner";
+    26→import { Badge } from "@/components/ui/badge";
+    27→import { Button } from "@/components/ui/button";
+    28→import { CardEditorDialog } from "@/components/card-editor-dialog";
+    29→import {
+    30→  Dialog,
+    31→  DialogContent,
+    32→  DialogDescription,
+    33→  DialogHeader,
+    34→  DialogTitle,
+    35→  DialogTrigger,
+    36→} from "@/components/ui/dialog";
+    37→import { Separator } from "@/components/ui/separator";
+    38→import { Skeleton } from "@/components/ui/skeleton";
+    39→import {
+    40→  Popover,
+    41→  PopoverContent,
+    42→  PopoverTrigger,
+    43→} from "@/components/ui/popover";
+    44→import {
+    45→  Tooltip,
+    46→  TooltipContent,
+    47→  TooltipProvider,
+    48→  TooltipTrigger,
+    49→} from "@/components/ui/tooltip";
+    50→import { Input } from "@/components/ui/input";
+    51→import {
+    52→  Select,
+    53→  SelectContent,
+    54→  SelectItem,
+    55→  SelectTrigger,
+    56→  SelectValue,
+    57→} from "@/components/ui/select";
+    58→import {
+    59→  apiJson,
+    60→  faNum,
+    61→  themeLabel,
+    62→  toErrorMessage,
+    63→  CARD_THEME_OPTIONS,
+    64→  type CardWithHtml,
+    65→} from "@/components/shared";
+    66→
+    67→/* ─── خروجی CSV همه کارت‌ها (سازگار با اکسل فارسی) ─────────── */
+    68→
+    69→const SORT_OPTIONS: { value: string; label: string }[] = [
+    70→  { value: "default", label: "ترتیب پیش‌فرض" },
+    71→  { value: "name", label: "مرتب‌سازی بر اساس نام" },
+    72→  { value: "price-asc", label: "ارزان‌ترین اول" },
+    73→  { value: "price-desc", label: "گران‌ترین اول" },
+    74→];
+    75→
+    76→function csvCell(v: string | number): string {
+    77→  const s = String(v ?? "");
+    78→  return `"${s.replace(/"/g, '""')}"`;
+    79→}
+    80→
+    81→function buildCardsCsv(cards: CardWithHtml[]): string {
+    82→  const header = [
+    83→    "نام محصول",
+    84→    "نام لاتین",
+    85→    "قیمت (تومان)",
+    86→    "لینک مرجع",
+    87→    "تم قالب",
+    88→    "تعداد مشخصات",
+    89→    "روش مصرف",
+    90→  ];
+    91→  const rows = cards.map((c) => [
+    92→    c.name || c.rawInput,
+    93→    c.nameEn || "",
+    94→    c.priceValue || 0,
+    95→    c.link || "",
+    96→    themeLabel(c.theme),
+    97→    c.specs?.length ?? 0,
+    98→    (c.usage || "").replace(/\r?\n/g, " | "),
+    99→  ]);
+   100→  const body = [header, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n");
+   101→  return `\uFEFF${body}`;
+   102→}
+   103→
+   104→/* ─── پیش‌نمایش مقیاس‌شده کارت ─────────────────────────────── */
+   105→
+   106→export function CardPreview({
+   107→  html,
+   108→  title,
+   109→  scale = 0.55,
+   110→  className = "h-[420px]",
+   111→}: {
+   112→  html?: string;
+   113→  title: string;
+   114→  scale?: number;
+   115→  className?: string;
+   116→}) {
+   117→  return (
+   118→    <div
+   119→      className={`relative flex justify-center overflow-hidden bg-zinc-100 dark:bg-zinc-900 ${className}`}
+   120→    >
+   121→      {html ? (
+   122→        <iframe
+   123→          srcDoc={html}
+   124→          title={`پیش‌نمایش کارت ${title}`}
+   125→          sandbox=""
+   126→          loading="lazy"
+   127→          className="pointer-events-none h-[764px] w-[480px] shrink-0 border-0 bg-white"
+   128→          style={{ transform: `scale(${scale})`, transformOrigin: "top center" }}
+   129→        />
+   130→      ) : (
+   131→        <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
+   132→          پیش‌نمایش در دسترس نیست
+   133→        </div>
+   134→      )}
+   135→    </div>
+   136→  );
+   137→}
+   138→
+   139→/* ─── نشان‌های راستی‌آزمایی ────────────────────────────────── */
+   140→
+   141→function VerifyBadges({ card }: { card: CardWithHtml }) {
+   142→  if (!card.issues || card.issues.length === 0) return null;
+   143→  return (
+   144→    <div className="space-y-2">
+   145→      <h4 className="text-sm font-bold">راستی‌آزمایی</h4>
+   146→      <div className="flex flex-wrap gap-2">
+   147→        {card.issues.map((issue, i) => {
+   148→          const tone = issue.ok
+   149→            ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-950/40 dark:text-emerald-300"
+   150→            : issue.fixed
+   151→              ? "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-300"
+   152→              : "border-red-300 bg-red-50 text-red-600 dark:border-red-500/30 dark:bg-red-950/40 dark:text-red-300";
+   153→          return (
+   154→            <Tooltip key={i}>
+   155→              <TooltipTrigger asChild>
+   156→                <Badge variant="outline" className={`cursor-default gap-1.5 rounded-full px-3 py-1.5 ${tone}`}>
+   157→                  {issue.item}
+   158→                  {issue.ok ? (
+   159→                    <Check className="size-3.5" aria-hidden />
+   160→                  ) : issue.fixed ? (
+   161→                    <Check className="size-3.5" aria-hidden />
+   162→                  ) : (
+   163→                    <X className="size-3.5" aria-hidden />
+   164→                  )}
+   165→                  {issue.fixed && !issue.ok && <span className="text-[10px]">(اصلاح شد)</span>}
+   166→                </Badge>
+   167→              </TooltipTrigger>
+   168→              <TooltipContent className="max-w-64 text-xs" dir="rtl">
+   169→                {issue.detail}
+   170→              </TooltipContent>
+   171→            </Tooltip>
+   172→          );
+   173→        })}
+   174→      </div>
+   175→    </div>
+   176→  );
+   177→}
+   178→
+   179→/* ─── دیالوگ مشاهده کامل ──────────────────────────────────── */
+   180→
+   181→function CardDetailDialog({ card, jobId }: { card: CardWithHtml; jobId: string }) {
+   182→  return (
+   183→    <Dialog>
+   184→      <DialogTrigger asChild>
+   185→        <Button
+   186→          variant="outline"
+   187→          className="h-10 gap-2 rounded-xl text-xs transition-colors hover:border-emerald-400 hover:text-emerald-700"
+   188→        >
+   189→          <Maximize2 className="size-4" aria-hidden />
+   190→          مشاهده کامل
+   191→        </Button>
+   192→      </DialogTrigger>
+   193→      <DialogContent className="max-h-[90vh] overflow-y-auto scrollbar-thin sm:max-w-2xl">
+   194→        <DialogHeader>
+   195→          <DialogTitle className="text-right leading-7">{card.name || card.rawInput}</DialogTitle>
+   196→          <DialogDescription className="text-right">
+   197→            جزئیات کامل کارت شامل پیش‌نمایش، مشخصات و نتیجه راستی‌آزمایی
+   198→          </DialogDescription>
+   199→        </DialogHeader>
+   200→
+   201→        <div className="space-y-5">
+   202→          <CardPreview
+   203→            html={card.html}
+   204→            title={card.name || card.rawInput}
+   205→            scale={0.85}
+   206→            className="h-[65vh] rounded-xl border"
+   207→          />
+   208→
+   209→          <VerifyBadges card={card} />
+   210→
+   211→          {(card.price || card.priceValue > 0) && (
+   212→            <div className="flex items-center gap-2">
+   213→              <h4 className="text-sm font-bold">قیمت نهایی:</h4>
+   214→              <Badge className="rounded-full bg-emerald-600 px-3 py-1 text-white">
+   215→                {card.price ||
+   216→                  `${faNum(card.priceValue)} تومان`}
+   217→              </Badge>
+   218→            </div>
+   219→          )}
+   220→
+   221→          {card.description && (
+   222→            <div className="space-y-1.5">
+   223→              <h4 className="text-sm font-bold">توضیحات</h4>
+   224→              <p className="whitespace-pre-line text-sm leading-7 text-muted-foreground">
+   225→                {card.description}
+   226→              </p>
+   227→            </div>
+   228→          )}
+   229→
+   230→          {card.usage && (
+   231→            <div className="space-y-1.5 rounded-xl border border-amber-200 bg-amber-50 p-3.5 dark:border-amber-500/30 dark:bg-amber-950/30">
+   232→              <h4 className="text-sm font-bold text-amber-800 dark:text-amber-300">روش مصرف</h4>
+   233→              <p className="whitespace-pre-line text-sm leading-7 text-amber-900/80 dark:text-amber-200/80">
+   234→                {card.usage}
+   235→              </p>
+   236→            </div>
+   237→          )}
+   238→
+   239→          {card.specs && card.specs.length > 0 && (
+   240→            <div className="space-y-2">
+   241→              <h4 className="text-sm font-bold">مشخصات</h4>
+   242→              <ul className="scrollbar-thin max-h-44 space-y-1 overflow-y-auto rounded-xl border p-2 text-sm">
+   243→                {card.specs.map((spec, i) => (
+   244→                  <li
+   245→                    key={i}
+   246→                    className="flex items-start justify-between gap-3 rounded-lg px-2.5 py-1.5 odd:bg-muted/50"
+   247→                  >
+   248→                    <span className="shrink-0 font-medium text-muted-foreground">{spec.key}</span>
+   249→                    <span className="text-left leading-6">{spec.value}</span>
+   250→                  </li>
+   251→                ))}
+   252→              </ul>
+   253→            </div>
+   254→          )}
+   255→
+   256→          {card.priceSource && card.priceSource.length > 0 && (
+   257→            <div className="space-y-2">
+   258→              <h4 className="text-sm font-bold">منابع قیمت</h4>
+   259→              <ul className="space-y-1.5 text-sm">
+   260→                {card.priceSource.map((src, i) => (
+   261→                  <li key={i} className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2">
+   262→                    <a
+   263→                      href={src.url}
+   264→                      target="_blank"
+   265→                      rel="noopener noreferrer"
+   266→                      className="flex min-w-0 items-center gap-1.5 font-medium text-emerald-700 hover:underline dark:text-emerald-400"
+   267→                    >
+   268→                      <span className="truncate" dir="ltr">{src.site}</span>
+   269→                      <ExternalLink className="size-3.5 shrink-0" aria-hidden />
+   270→                    </a>
+   271→                    <span className="shrink-0 font-bold">
+   272→                      {faNum(src.price)} <span className="text-xs font-normal">تومان</span>
+   273→                    </span>
+   274→                  </li>
+   275→                ))}
+   276→              </ul>
+   277→            </div>
+   278→          )}
+   279→
+   280→          {card.link && (
+   281→            <div className="space-y-1.5">
+   282→              <h4 className="text-sm font-bold">لینک مرجع</h4>
+   283→              <a
+   284→                href={card.link}
+   285→                target="_blank"
+   286→                rel="noopener noreferrer"
+   287→                dir="ltr"
+   288→                className="block truncate rounded-lg bg-muted/50 px-3 py-2 text-left font-mono text-xs text-emerald-700 hover:underline dark:text-emerald-400"
+   289→              >
+   290→                {card.link}
+   291→              </a>
+   292→            </div>
+   293→          )}
+   294→
+   295→          <Separator />
+   296→
+   297→          <div className="flex flex-wrap gap-2">
+   298→            <Button asChild className="h-10 gap-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700">
+   299→              <a href={`/api/jobs/${jobId}/download/${card.id}`} download>
+   300→                <Download className="size-4" aria-hidden />
+   301→                دانلود HTML
+   302→              </a>
+   303→            </Button>
+   304→            <Button asChild variant="outline" className="h-10 gap-2 rounded-xl">
+   305→              <a href={`/api/jobs/${jobId}/download/${card.id}?format=json`} download>
+   306→                <Braces className="size-4" aria-hidden />
+   307→                دانلود JSON
+   308→              </a>
+   309→            </Button>
+   310→            <ShareCardDialog card={card} />
+   311→          </div>
+   312→        </div>
+   313→      </DialogContent>
+   314→    </Dialog>
+   315→  );
+   316→}
+   317→
+   318→/* ─── دیالوگ اشتراک‌گذاری کارت (لینک عمومی + QR) ─────────── */
+   319→
+   320→export function ShareCardDialog({
+   321→  card,
+   322→}: {
+   323→  card: CardWithHtml;
+   324→  jobId?: string;
+   325→  asChildButton?: boolean;
+   326→}) {
+   327→  const title = card.name || card.rawInput;
+   328→  const sharePath = `/api/cards/${card.id}/share`;
+   329→  const [shareUrl, setShareUrl] = React.useState("");
+   330→  const [copied, setCopied] = React.useState(false);
+   331→
+   332→  React.useEffect(() => {
+   333→    if (typeof window !== "undefined") {
+   334→      setShareUrl(`${window.location.origin}${sharePath}`);
+   335→    }
+   336→  }, [sharePath]);
+   337→
+   338→  const copyLink = async () => {
+   339→    try {
+   340→      await navigator.clipboard.writeText(shareUrl);
+   341→      setCopied(true);
+   342→      toast.success("لینک اشتراک‌گذاری کپی شد");
+   343→      window.setTimeout(() => setCopied(false), 1800);
+   344→    } catch (e) {
+   345→      toast.error("کپی ناموفق بود", { description: toErrorMessage(e) });
+   346→    }
+   347→  };
+   348→
+   349→  return (
+   350→    <Dialog>
+   351→      <DialogTrigger asChild>
+   352→        <Button variant="outline" className="h-10 gap-1.5 rounded-xl text-xs transition-colors hover:border-emerald-400 hover:text-emerald-700">
+   353→          <Share2 className="size-4" aria-hidden />
+   354→          اشتراک‌گذاری
+   355→        </Button>
+   356→      </DialogTrigger>
+   357→      <DialogContent className="max-h-[90vh] overflow-y-auto scrollbar-thin sm:max-w-md">
+   358→        <DialogHeader>
+   359→          <DialogTitle className="flex items-center gap-2 text-right">
+   360→            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
+   361→              <Share2 className="size-4" aria-hidden />
+   362→            </span>
+   363→            اشتراک‌گذاری کارت
+   364→          </DialogTitle>
+   365→          <DialogDescription className="text-right">
+   366→            لینک عمومی و QR کد کارت «{title}» — صفحه اشتراک مستقل با سئوی محصول
+   367→          </DialogDescription>
+   368→        </DialogHeader>
+   369→
+   370→        <div className="space-y-4">
+   371→          {/* QR کد */}
+   372→          <div className="flex flex-col items-center gap-2.5 rounded-2xl border bg-muted/30 p-4">
+   373→            <div className="rounded-xl border-4 border-white bg-white p-1.5 shadow-md ring-1 ring-black/5">
+   374→              <img
+   375→                src={`/api/cards/${card.id}/qr`}
+   376→                alt={`QR کد اشتراک‌گذاری ${title}`}
+   377→                width={168}
+   378→                height={168}
+   379→                className="size-[168px]"
+   380→                loading="lazy"
+   381→              />
+   382→            </div>
+   383→            <p className="text-[11px] text-muted-foreground">
+   384→              برای مشاهده سریع کارت روی موبایل، اسکن کنید
+   385→            </p>
+   386→          </div>
+   387→
+   388→          {/* لینک عمومی */}
+   389→          <div className="space-y-1.5">
+   390→            <label className="text-xs font-bold">لینک عمومی کارت</label>
+   391→            <div className="flex gap-2" dir="ltr">
+   392→              <input
+   393→                readOnly
+   394→                value={shareUrl}
+   395→                aria-label="لینک عمومی کارت"
+   396→                className="h-10 min-w-0 flex-1 truncate rounded-xl border bg-muted/40 px-3 font-mono text-xs text-muted-foreground"
+   397→              />
+   398→              <Button
+   399→                type="button"
+   400→                onClick={() => void copyLink()}
+   401→                className="h-10 shrink-0 gap-1.5 rounded-xl bg-emerald-600 px-3 text-xs text-white hover:bg-emerald-700"
+   402→              >
+   403→                {copied ? <Check className="size-4" aria-hidden /> : <Copy className="size-4" aria-hidden />}
+   404→                {copied ? "کپی شد" : "کپی"}
+   405→              </Button>
+   406→            </div>
+   407→          </div>
+   408→
+   409→          <div className="grid grid-cols-2 gap-2">
+   410→            <Button asChild className="h-10 gap-1.5 rounded-xl bg-emerald-600 text-xs text-white hover:bg-emerald-700">
+   411→              <a href={sharePath} target="_blank" rel="noopener noreferrer">
+   412→                <ExternalLink className="size-4" aria-hidden />
+   413→                باز کردن صفحه
+   414→              </a>
+   415→            </Button>
+   416→            <Button asChild variant="outline" className="h-10 gap-1.5 rounded-xl text-xs">
+   417→              <a href={`/api/cards/${card.id}/qr`} download={`qr-${card.id.slice(-6)}.png`}>
+   418→                <QrCode className="size-4" aria-hidden />
+   419→                دانلود QR
+   420→              </a>
+   421→            </Button>
+   422→          </div>
+   423→          <p className="text-[11px] leading-5 text-muted-foreground">
+   424→            صفحه اشتراک شامل متاتگ‌های سوشال و داده ساختاریافته Product (سئو) است؛ می‌توانید لینک را در بله، واتساپ یا اینستاگرام بفرستید.
+   425→          </p>
+   426→        </div>
+   427→      </DialogContent>
+   428→    </Dialog>
+   429→  );
+   430→}
+   431→
+   432→/* ─── کارت خروجی ──────────────────────────────────────────── */
+   433→
+   434→interface OutputCardProps {
+   435→  card: CardWithHtml;
+   436→  jobId: string;
+   437→  index: number;
+   438→  onEdit: (card: CardWithHtml) => void;
+   439→  onCardUpdated: (card: CardWithHtml) => void;
+   440→}
+   441→
+   442→function OutputCardItem({ card, jobId, index, onEdit, onCardUpdated }: OutputCardProps) {
+   443→  const title = card.name || card.rawInput;
+   444→
+   445→  const copyHtml = async () => {
+   446→    if (!card.html) {
+   447→      toast.error("محتوای HTML این کارت در دسترس نیست");
+   448→      return;
+   449→    }
+   450→    try {
+   451→      await navigator.clipboard.writeText(card.html);
+   452→      toast.success("کد HTML کارت کپی شد");
+   453→    } catch (e) {
+   454→      toast.error("کپی ناموفق بود", { description: toErrorMessage(e) });
+   455→    }
+   456→  };
+   457→
+   458→  return (
+   459→    <motion.div
+   460→      initial={{ opacity: 0, y: 24, scale: 0.98 }}
+   461→      animate={{ opacity: 1, y: 0, scale: 1 }}
+   462→      transition={{ delay: Math.min(index * 0.07, 0.4), duration: 0.35, ease: "easeOut" }}
+   463→      className="group overflow-hidden rounded-2xl border bg-card shadow-sm transition-all hover:-translate-y-1 hover:shadow-lg hover:shadow-emerald-600/10"
+   464→    >
+   465→      <CardPreview html={card.html} title={title} />
+   466→
+   467→      <div className="space-y-3 p-4">
+   468→        <h3 className="line-clamp-2 min-h-11 text-sm font-bold leading-6">{title}</h3>
+   469→
+   470→        <div className="flex flex-wrap items-center gap-2">
+   471→          <Badge className="gap-1 rounded-full bg-gradient-to-l from-emerald-600 to-emerald-500 px-3 py-1 text-xs font-bold text-white shadow-sm shadow-emerald-600/20">
+   472→            <Coins className="size-3.5 opacity-90" aria-hidden />
+   473→            {(card.price || (card.priceValue > 0 ? `${faNum(card.priceValue)} تومان` : "")) || "بدون قیمت"}
+   474→          </Badge>
+   475→          <Badge
+   476→            variant="outline"
+   477→            className="gap-1 rounded-full text-[11px] font-normal text-muted-foreground"
+   478→          >
+   479→            <span
+   480→              className="inline-block size-2 rounded-full"
+   481→              style={{
+   482→                background:
+   483→                  card.theme === "rose"
+   484→                    ? "#e11d48"
+   485→                    : card.theme === "violet"
+   486→                      ? "#7c3aed"
+   487→                      : card.theme === "amber"
+   488→                        ? "#b45309"
+   489→                        : card.theme === "teal"
+   490→                          ? "#0d9488"
+   491→                          : card.theme === "midnight"
+   492→                            ? "#34d399"
+   493→                            : "#16a34a",
+   494→              }}
+   495→              aria-hidden
+   496→            />
+   497→            تم {themeLabel(card.theme)}
+   498→          </Badge>
+   499→          {card.nameEn && (
+   500→            <Badge variant="outline" className="max-w-40 rounded-full text-[11px] font-normal" dir="ltr">
+   501→              <span className="truncate">{card.nameEn}</span>
+   502→            </Badge>
+   503→          )}
+   504→        </div>
+   505→
+   506→        <div className="grid grid-cols-2 gap-2">
+   507→          <Button asChild variant="outline" className="h-10 gap-1.5 rounded-xl text-xs">
+   508→            <a href={`/api/jobs/${jobId}/download/${card.id}`} download>
+   509→              <Download className="size-4" aria-hidden />
+   510→              دانلود HTML
+   511→            </a>
+   512→          </Button>
+   513→          <Button
+   514→            variant="outline"
+   515→            onClick={() => void copyHtml()}
+   516→            className="h-10 gap-1.5 rounded-xl text-xs"
+   517→          >
+   518→            <Copy className="size-4" aria-hidden />
+   519→            کپی HTML
+   520→          </Button>
+   521→          <Button
+   522→            onClick={() => onEdit(card)}
+   523→            className="h-10 gap-1.5 rounded-xl bg-amber-500 text-xs text-white hover:bg-amber-600"
+   524→          >
+   525→            <Wand2 className="size-4" aria-hidden />
+   526→            ویرایش هوشمند
+   527→          </Button>
+   528→          <CardEditorDialog card={card} onSaved={onCardUpdated} />
+   529→          <CardDetailDialog card={card} jobId={jobId} />
+   530→          <ShareCardDialog card={card} />
+   531→          <Button asChild variant="outline" className="h-10 gap-1.5 rounded-xl text-xs">
+   532→            <a
+   533→              href={`/api/jobs/${jobId}/download/${card.id}?format=json`}
+   534→              download
+   535→              title="داده ساختاریافته کارت برای مصرف برنامه‌ای"
+   536→            >
+   537→              <Braces className="size-4" aria-hidden />
+   538→              دانلود JSON
+   539→            </a>
+   540→          </Button>
+   541→        </div>
+   542→      </div>
+   543→    </motion.div>
+   544→  );
+   545→}
+   546→
+   547→/* ─── اعمال گروهی تم روی همه کارت‌ها ──────────────────── */
+   548→
+   549→function BulkThemePopover({
+   550→  jobId,
+   551→  disabled,
+   552→  onApplied,
+   553→}: {
+   554→  jobId: string;
+   555→  disabled: boolean;
+   556→  onApplied: () => void;
+   557→}) {
+   558→  const [open, setOpen] = React.useState(false);
+   559→  const [applying, setApplying] = React.useState("");
+   560→
+   561→  const applyTheme = async (key: string, label: string) => {
+   562→    setApplying(key);
+   563→    try {
+   564→      const data = await apiJson<{ ok: boolean; updated: number; theme: string }>(
+   565→        `/api/jobs/${jobId}/theme`,
+   566→        {
+   567→          method: "POST",
+   568→          headers: { "Content-Type": "application/json" },
+   569→          body: JSON.stringify({ theme: key }),
+   570→        },
+   571→      );
+   572→      toast.success(`تم «${label}» روی ${faNum(data.updated ?? 0)} کارت اعمال شد`);
+   573→      setOpen(false);
+   574→      onApplied();
+   575→    } catch (e) {
+   576→      toast.error("اعمال گروهی تم ناموفق بود", { description: toErrorMessage(e) });
+   577→    } finally {
+   578→      setApplying("");
+   579→    }
+   580→  };
+   581→
+   582→  return (
+   583→    <Popover open={open} onOpenChange={setOpen}>
+   584→      <PopoverTrigger asChild>
+   585→        <Button
+   586→          variant="outline"
+   587→          disabled={disabled}
+   588→          className="h-11 gap-2 rounded-xl border-emerald-300 bg-white/70 text-emerald-800 hover:border-emerald-500 hover:bg-emerald-50 hover:text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-950/20 dark:text-emerald-300"
+   589→        >
+   590→          <PaintBucket className="size-5" aria-hidden />
+   591→          تغییر گروهی تم
+   592→        </Button>
+   593→      </PopoverTrigger>
+   594→      <PopoverContent dir="rtl" align="center" className="w-72 rounded-xl p-3">
+   595→        <p className="mb-2 text-xs font-bold">انتخاب تم برای همه کارت‌های این پروسه</p>
+   596→        <p className="mb-3 text-[11px] leading-5 text-muted-foreground">
+   597→          HTML همه کارت‌ها بلافاصله با تم جدید بازسازی می‌شود.
+   598→        </p>
+   599→        <div className="grid grid-cols-2 gap-2">
+   600→          {CARD_THEME_OPTIONS.map((t) => (
+   601→            <button
+   602→              key={t.key}
+   603→              type="button"
+   604→              disabled={applying !== ""}
+   605→              onClick={() => void applyTheme(t.key, t.label)}
+   606→              className="flex items-center gap-2 rounded-lg border px-2.5 py-2 text-right text-xs font-semibold transition-all hover:-translate-y-0.5 hover:border-emerald-400 hover:bg-emerald-50/60 disabled:opacity-50 dark:hover:bg-emerald-950/30"
+   607→            >
+   608→              {applying === t.key ? (
+   609→                <Loader2 className="size-4 shrink-0 animate-spin text-emerald-600" aria-hidden />
+   610→              ) : (
+   611→                <span
+   612→                  className="size-4 shrink-0 rounded-full ring-1 ring-black/10"
+   613→                  style={{ background: t.swatch[0] }}
+   614→                  aria-hidden
+   615→                />
+   616→              )}
+   617→              {t.label}
+   618→            </button>
+   619→          ))}
+   620→        </div>
+   621→      </PopoverContent>
+   622→    </Popover>
+   623→  );
+   624→}
+   625→
+   626→/* ─── گالری خروجی ─────────────────────────────────────────── */
+   627→
+   628→export interface OutputGalleryProps {
+   629→  jobId: string;
+   630→  cards: CardWithHtml[];
+   631→  running: boolean;
+   632→  onEditCard: (card: CardWithHtml) => void;
+   633→  onCardUpdated: (card: CardWithHtml) => void;
+   634→  onBulkThemeApplied: () => void;
+   635→}
+   636→
+   637→export function OutputGallery({
+   638→  jobId,
+   639→  cards,
+   640→  running,
+   641→  onEditCard,
+   642→  onCardUpdated,
+   643→  onBulkThemeApplied,
+   644→}: OutputGalleryProps) {
+   645→  const [query, setQuery] = React.useState("");
+   646→  const [sortBy, setSortBy] = React.useState("default");
+   647→
+   648→  const visibleCards = React.useMemo(() => {
+   649→    const q = query.trim().toLowerCase();
+   650→    let list = cards;
+   651→    if (q) {
+   652→      list = list.filter((c) =>
+   653→        `${c.name || ""} ${c.nameEn || ""} ${c.rawInput}`
+   654→          .toLowerCase()
+   655→          .includes(q),
+   656→      );
+   657→    }
+   658→    if (sortBy === "name") {
+   659→      list = [...list].sort((a, b) =>
+   660→        (a.name || a.rawInput).localeCompare(b.name || b.rawInput, "fa"),
+   661→      );
+   662→    } else if (sortBy === "price-asc") {
+   663→      list = [...list].sort((a, b) => (a.priceValue || 0) - (b.priceValue || 0));
+   664→    } else if (sortBy === "price-desc") {
+   665→      list = [...list].sort((a, b) => (b.priceValue || 0) - (a.priceValue || 0));
+   666→    }
+   667→    return list;
+   668→  }, [cards, query, sortBy]);
+   669→
+   670→  const exportCsv = () => {
+   671→    if (!visibleCards.length) {
+   672→      toast.error("کارتی برای خروجی CSV وجود ندارد");
+   673→      return;
+   674→    }
+   675→    try {
+   676→      const csv = buildCardsCsv(visibleCards);
+   677→      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+   678→      const url = URL.createObjectURL(blob);
+   679→      const a = document.createElement("a");
+   680→      a.href = url;
+   681→      a.download = `cards-${jobId.slice(-6)}.csv`;
+   682→      document.body.appendChild(a);
+   683→      a.click();
+   684→      a.remove();
+   685→      URL.revokeObjectURL(url);
+   686→      toast.success(`فایل CSV با ${faNum(visibleCards.length)} کارت دانلود شد`);
+   687→    } catch (e) {
+   688→      toast.error("ساخت فایل CSV ناموفق بود", { description: toErrorMessage(e) });
+   689→    }
+   690→  };
+   691→
+   692→  if (!running && cards.length === 0) return null;
+   693→
+   694→  return (
+   695→    <TooltipProvider delayDuration={200}>
+   696→      <motion.section
+   697→        id="outputs"
+   698→        initial={{ opacity: 0, y: 24 }}
+   699→        animate={{ opacity: 1, y: 0 }}
+   700→        transition={{ duration: 0.4, ease: "easeOut" }}
+   701→        className="scroll-mt-24 space-y-5"
+   702→      >
+   703→        <div className="relative overflow-hidden rounded-2xl border border-dashed border-emerald-300 bg-gradient-to-bl from-emerald-50/80 via-white to-amber-50/60 p-5 text-center shadow-sm dark:border-emerald-500/30 dark:from-emerald-950/25 dark:via-card dark:to-amber-950/10">
+   704→          <div
+   705→            className="pointer-events-none absolute -left-10 -top-10 size-32 rounded-full bg-emerald-200/40 blur-2xl dark:bg-emerald-500/10"
+   706→            aria-hidden
+   707→          />
+   708→          <div
+   709→            className="pointer-events-none absolute -bottom-12 -right-8 size-32 rounded-full bg-amber-200/40 blur-2xl dark:bg-amber-500/10"
+   710→            aria-hidden
+   711→          />
+   712→          <h2 className="relative text-lg font-extrabold">
+   713→            خروجی‌ها
+   714→            <Badge className="mr-2 rounded-full bg-emerald-600 px-2.5 py-0.5 text-white">
+   715→              {faNum(cards.length)} کارت
+   716→            </Badge>
+   717→          </h2>
+   718→          <p className="relative text-xs text-muted-foreground">
+   719→            پیش‌نمایش زنده کارت‌های تولیدشده — دانلود HTML، JSON ساختاریافته یا ZIP کامل (شامل HTML + JSON + cards.json)
+   720→          </p>
+   721→          {cards.length > 0 && (
+   722→            <div className="relative flex flex-wrap items-center justify-center gap-2.5">
+   723→              <Button
+   724→                asChild
+   725→                size="lg"
+   726→                className="h-11 gap-2 rounded-xl bg-emerald-600 text-white shadow-md shadow-emerald-600/25 hover:bg-emerald-700"
+   727→              >
+   728→                <a href={`/api/jobs/${jobId}/download`} download>
+   729→                  <FileArchive className="size-5" aria-hidden />
+   730→                  دانلود ZIP همه کارت‌ها
+   731→                </a>
+   732→              </Button>
+   733→              <BulkThemePopover jobId={jobId} disabled={running} onApplied={onBulkThemeApplied} />
+   734→              <Button
+   735→                variant="outline"
+   736→                onClick={() => void exportCsv()}
+   737→                disabled={running}
+   738→                title="جدول قیمت و مشخصات همه کارت‌ها برای اکسل"
+   739→                className="h-11 gap-2 rounded-xl border-emerald-300 bg-white/70 text-emerald-800 hover:border-emerald-500 hover:bg-emerald-50 hover:text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-950/20 dark:text-emerald-300"
+   740→              >
+   741→                <FileSpreadsheet className="size-5" aria-hidden />
+   742→                خروجی CSV
+   743→              </Button>
+   744→            </div>
+   745→          )}
+   746→          {cards.length > 2 && (
+   747→            <div className="relative flex w-full max-w-xl flex-col gap-2 sm:flex-row sm:items-center">
+   748→              <div className="relative flex-1">
+   749→                <Search
+   750→                  className="pointer-events-none absolute inset-y-0 right-3 flex w-4 items-center text-muted-foreground"
+   751→                  aria-hidden
+   752→                />
+   753→                <Input
+   754→                  value={query}
+   755→                  onChange={(e) => setQuery(e.target.value)}
+   756→                  placeholder="جستجو در کارت‌ها (نام فارسی یا لاتین)…"
+   757→                  className="h-10 rounded-xl pr-9"
+   758→                  aria-label="جستجو در کارت‌های خروجی"
+   759→                />
+   760→                {query && (
+   761→                  <button
+   762→                    type="button"
+   763→                    onClick={() => setQuery("")}
+   764→                    aria-label="پاک کردن جستجو"
+   765→                    className="absolute inset-y-0 left-2 flex w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
+   766→                  >
+   767→                    <X className="size-4" aria-hidden />
+   768→                  </button>
+   769→                )}
+   770→              </div>
+   771→              <Select dir="rtl" value={sortBy} onValueChange={setSortBy}>
+   772→                <SelectTrigger className="h-10 w-full rounded-xl sm:w-52" aria-label="مرتب‌سازی کارت‌ها">
+   773→                  <span className="flex items-center gap-1.5 text-xs">
+   774→                    <ArrowDownWideNarrow className="size-4 text-emerald-600 dark:text-emerald-400" aria-hidden />
+   775→                    <SelectValue />
+   776→                  </span>
+   777→                </SelectTrigger>
+   778→                <SelectContent>
+   779→                  {SORT_OPTIONS.map((o) => (
+   780→                    <SelectItem key={o.value} value={o.value}>
+   781→                      {o.label}
+   782→                    </SelectItem>
+   783→                  ))}
+   784→                </SelectContent>
+   785→              </Select>
+   786→            </div>
+   787→          )}
+   788→        </div>
+   789→
+   790→        {cards.length === 0 && running ? (
+   791→          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+   792→            {[0, 1, 2].map((i) => (
+   793→              <div key={i} className="overflow-hidden rounded-2xl border bg-card">
+   794→                <Skeleton className="h-[420px] w-full rounded-none" />
+   795→                <div className="space-y-3 p-4">
+   796→                  <Skeleton className="h-5 w-3/4" />
+   797→                  <Skeleton className="h-6 w-24 rounded-full" />
+   798→                  <div className="grid grid-cols-2 gap-2">
+   799→                    <Skeleton className="h-10 rounded-xl" />
+   800→                    <Skeleton className="h-10 rounded-xl" />
+   801→                    <Skeleton className="h-10 rounded-xl" />
+   802→                    <Skeleton className="h-10 rounded-xl" />
+   803→                  </div>
+   804→                </div>
+   805→              </div>
+   806→            ))}
+   807→          </div>
+   808→        ) : visibleCards.length === 0 ? (
+   809→          <div className="flex flex-col items-center gap-2.5 rounded-2xl border border-dashed p-10 text-center">
+   810→            <Search className="size-10 text-emerald-400/70" aria-hidden />
+   811→            <p className="text-sm font-medium">کارتی با عبارت «{query}» یافت نشد</p>
+   812→            <Button
+   813→              variant="ghost"
+   814→              size="sm"
+   815→              onClick={() => {
+   816→                setQuery("");
+   817→                setSortBy("default");
+   818→              }}
+   819→              className="h-9 rounded-lg text-xs text-emerald-700 hover:text-emerald-800 dark:text-emerald-400"
+   820→            >
+   821→              پاک کردن جستجو و مرتب‌سازی
+   822→            </Button>
+   823→          </div>
+   824→        ) : (
+   825→          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+   826→            {visibleCards.map((card, i) => (
+   827→              <OutputCardItem
+   828→                key={card.id}
+   829→                card={card}
+   830→                jobId={jobId}
+   831→                index={i}
+   832→                onEdit={onEditCard}
+   833→                onCardUpdated={onCardUpdated}
+   834→              />
+   835→            ))}
+   836→          </div>
+   837→        )}
+   838→      </motion.section>
+   839→    </TooltipProvider>
+   840→  );
+   841→}
+   842→

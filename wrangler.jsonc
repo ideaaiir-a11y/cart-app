@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.derefify.com/config.json",
+  "name": "cart-app",
+  "main": "src/index.js",
+  "compatibility_date": "2025-01-01",
+  "containers": [
+    {
+      "class_name": "CartContainer",
+      "image": "ghcr.io/ideaaiir-a11y/cart:latest",
+      "max_instances": 3
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CART_CONTAINER",
+        "class_name": "CartContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["CartContainer"]
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "d1-template-database",
+      "database_id": "8c42c72d-d99a-465b-991d-602cbebc8cf7"
+    }
+  ],
+  "vars": {
+    "NODE_ENV": "production",
+    "APP_ORIGIN": "https://cart.space-z.ai/",
+    "ZAI_BASE_URL": "https://api.z.ai/v1",
+    "DATABASE_URL": "file:/data/database.sqlite"
+  }
+}
